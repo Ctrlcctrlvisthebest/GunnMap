@@ -1,5 +1,7 @@
 const PERIOD_COLORS = ["#e11d48", "#7c3aed", "#0284c7", "#059669", "#f97316", "#d4a017", "#dc2626"];
 const DRAFT_STORAGE_KEY = "gunnmap.schedule-draft.v1";
+const TEMPLATES_STORAGE_KEY = "gunnmap.schedule-templates.v1";
+const SHARE_PARAM = "schedule";
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const EXAMPLE = [
   ["F", "F4"], ["M", "M3"], ["J", "J3"], ["K", "K1"],
@@ -12,6 +14,13 @@ const status = document.querySelector("#status");
 const renderButton = document.querySelector("#render-button");
 const sampleButton = document.querySelector("#sample-button");
 const clearButton = document.querySelector("#clear-button");
+const shareButton = document.querySelector("#share-button");
+const exportButton = document.querySelector("#export-button");
+const importButton = document.querySelector("#import-button");
+const importInput = document.querySelector("#import-input");
+const templateSelect = document.querySelector("#template-select");
+const saveTemplateButton = document.querySelector("#save-template-button");
+const deleteTemplateButton = document.querySelector("#delete-template-button");
 const mapImage = document.querySelector("#map-image");
 const downloadLink = document.querySelector("#download-link");
 const legend = document.querySelector("#legend");
@@ -26,13 +35,11 @@ function showDraftStatus(message, isError = false) {
   draftStatus.classList.toggle("error", isError);
 }
 
-function isValidDraft(value) {
+function isValidPeriods(periods) {
   return Boolean(
-    value &&
-      value.version === 1 &&
-      Array.isArray(value.periods) &&
-      value.periods.length === 7 &&
-      value.periods.every((period) => (
+    Array.isArray(periods) &&
+      periods.length === 7 &&
+      periods.every((period) => (
         period &&
         typeof period.building === "string" &&
         typeof period.room === "string" &&
@@ -40,6 +47,10 @@ function isValidDraft(value) {
         HEX_COLOR.test(period.color)
       )),
   );
+}
+
+function isValidDraft(value) {
+  return Boolean(value && value.version === 1 && isValidPeriods(value.periods));
 }
 
 function saveDraft() {
@@ -73,6 +84,41 @@ function clearDraft() {
   } catch {
     return false;
   }
+}
+
+function loadTemplates() {
+  try {
+    const saved = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+    if (!saved) return [];
+    const templates = JSON.parse(saved);
+    if (!Array.isArray(templates)) return [];
+    return templates.filter((template) => (
+      template &&
+      typeof template.name === "string" &&
+      template.name.trim() &&
+      isValidPeriods(template.periods)
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function saveTemplates(templates) {
+  try {
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderTemplateOptions(selectedName = templateSelect.value) {
+  templateSelect.replaceChildren(new Option("Choose a saved template", ""));
+  for (const template of loadTemplates()) {
+    templateSelect.append(new Option(template.name, template.name));
+  }
+  templateSelect.value = selectedName;
+  deleteTemplateButton.disabled = !templateSelect.value;
 }
 
 function buildingName(code) {
@@ -120,8 +166,12 @@ function createPeriod(number) {
   select.addEventListener("change", () => {
     updateSuggestions(card);
     saveDraft();
+    updateDuplicateWarnings();
   });
-  card.querySelector('input[type="text"]').addEventListener("input", saveDraft);
+  card.querySelector('input[type="text"]').addEventListener("input", () => {
+    saveDraft();
+    updateDuplicateWarnings();
+  });
   card.querySelector('input[type="color"]').addEventListener("input", saveDraft);
   return card;
 }
@@ -132,6 +182,35 @@ function readPeriods() {
     room: card.querySelector('input[type="text"]').value.trim(),
     color: card.querySelector('input[type="color"]').value,
   }));
+}
+
+function findRoom(period) {
+  const building = period.building.trim().toUpperCase();
+  const roomName = period.room.trim();
+  if (!building || !roomName) return null;
+  return rooms.find((room) => (
+    room.building === building &&
+    (room.id === roomName || room.label === roomName || `${room.label} (${room.id})` === roomName)
+  ));
+}
+
+function duplicateWarningText(periods = readPeriods()) {
+  const seen = new Map();
+  const messages = [];
+  periods.forEach((period, index) => {
+    const room = findRoom(period);
+    if (!room) return;
+    if (seen.has(room.id)) {
+      messages.push(`Periods ${seen.get(room.id)} and ${index + 1} both use ${room.label}; the map uses Period ${index + 1}'s color.`);
+    } else {
+      seen.set(room.id, index + 1);
+    }
+  });
+  return messages.join(" ");
+}
+
+function updateDuplicateWarnings() {
+  warning.textContent = duplicateWarningText();
 }
 
 function showLegend(selected) {
@@ -170,10 +249,109 @@ function applyPeriods(periods) {
     roomInput.value = select.value ? period.room : "";
     colorInput.value = HEX_COLOR.test(period.color) ? period.color : PERIOD_COLORS[index];
   });
+  updateDuplicateWarnings();
 }
 
 function resetPeriods() {
   applyPeriods(PERIOD_COLORS.map((color) => ({ building: "", room: "", color })));
+}
+
+function loadSharedSchedule() {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  const encoded = new URLSearchParams(hash).get(SHARE_PARAM);
+  if (!encoded) return null;
+  try {
+    const periods = JSON.parse(encoded);
+    return isValidPeriods(periods) ? periods : null;
+  } catch {
+    return null;
+  }
+}
+
+async function shareSchedule() {
+  const encoded = encodeURIComponent(JSON.stringify(readPeriods()));
+  const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#${SHARE_PARAM}=${encoded}`;
+  window.history.replaceState(null, "", shareUrl);
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    status.textContent = "Share link copied.";
+  } catch {
+    status.textContent = "Share link ready in the address bar.";
+  }
+  status.classList.remove("error");
+}
+
+function exportSchedule() {
+  const payload = JSON.stringify({ version: 1, periods: readPeriods() }, null, 2);
+  const objectUrl = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = "gunnmap-schedule.json";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+  status.textContent = "Schedule exported.";
+  status.classList.remove("error");
+}
+
+async function importSchedule(file) {
+  try {
+    const value = JSON.parse(await file.text());
+    const periods = value && value.version === 1 ? value.periods : value;
+    if (!isValidPeriods(periods)) throw new Error("That file is not a valid GunnMap schedule.");
+    applyPeriods(periods);
+    saveDraft();
+    status.textContent = "Schedule imported.";
+    status.classList.remove("error");
+  } catch (error) {
+    status.textContent = error.message || "Could not import that schedule.";
+    status.classList.add("error");
+  } finally {
+    importInput.value = "";
+  }
+}
+
+function saveTemplate() {
+  const defaultName = `Schedule ${loadTemplates().length + 1}`;
+  const enteredName = window.prompt("Name this schedule template:", defaultName);
+  const name = enteredName && enteredName.trim().slice(0, 60);
+  if (!name) return;
+  const templates = loadTemplates().filter((template) => template.name !== name);
+  templates.unshift({ name, periods: readPeriods() });
+  if (!saveTemplates(templates)) {
+    status.textContent = "Template could not be saved in this browser.";
+    status.classList.add("error");
+    return;
+  }
+  renderTemplateOptions(name);
+  status.textContent = `Template “${name}” saved.`;
+  status.classList.remove("error");
+}
+
+function loadSelectedTemplate() {
+  const name = templateSelect.value;
+  const template = loadTemplates().find((item) => item.name === name);
+  deleteTemplateButton.disabled = !template;
+  if (!template) return;
+  applyPeriods(template.periods);
+  saveDraft();
+  status.textContent = `Template “${name}” loaded.`;
+  status.classList.remove("error");
+}
+
+function deleteSelectedTemplate() {
+  const name = templateSelect.value;
+  if (!name || !window.confirm(`Delete the “${name}” template?`)) return;
+  const templates = loadTemplates().filter((template) => template.name !== name);
+  if (!saveTemplates(templates)) {
+    status.textContent = "Template could not be deleted in this browser.";
+    status.classList.add("error");
+    return;
+  }
+  renderTemplateOptions();
+  status.textContent = `Template “${name}” deleted.`;
+  status.classList.remove("error");
 }
 
 sampleButton.addEventListener("click", () => {
@@ -196,6 +374,17 @@ clearButton.addEventListener("click", () => {
   status.classList.remove("error");
 });
 
+shareButton.addEventListener("click", shareSchedule);
+exportButton.addEventListener("click", exportSchedule);
+importButton.addEventListener("click", () => importInput.click());
+importInput.addEventListener("change", () => {
+  const [file] = importInput.files;
+  if (file) importSchedule(file);
+});
+templateSelect.addEventListener("change", loadSelectedTemplate);
+saveTemplateButton.addEventListener("click", saveTemplate);
+deleteTemplateButton.addEventListener("click", deleteSelectedTemplate);
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   renderButton.disabled = true;
@@ -214,7 +403,7 @@ form.addEventListener("submit", async (event) => {
     downloadLink.href = result.image_url;
     downloadLink.classList.remove("is-disabled");
     downloadLink.setAttribute("aria-disabled", "false");
-    warning.textContent = result.warnings.join(" ");
+    warning.textContent = duplicateWarningText() || result.warnings.join(" ");
     showLegend(result.selected);
     status.textContent = "Map ready.";
     if (window.matchMedia("(max-width: 1100px)").matches) {
@@ -239,8 +428,15 @@ async function init() {
     rooms = data.rooms;
     buildings = data.buildings;
     for (let number = 1; number <= 7; number += 1) list.append(createPeriod(number));
+    renderTemplateOptions();
+    const sharedSchedule = loadSharedSchedule();
     const draft = loadDraft();
-    if (draft) {
+    if (sharedSchedule) {
+      applyPeriods(sharedSchedule);
+      saveDraft();
+      showDraftStatus("Schedule loaded from the share link.");
+      status.textContent = "Shared schedule loaded. Select Generate Map to preview it.";
+    } else if (draft) {
       applyPeriods(draft);
       showDraftStatus("Draft restored from this device.");
     } else {
@@ -249,9 +445,9 @@ async function init() {
   } catch (error) {
     status.textContent = error.message;
     status.classList.add("error");
-    renderButton.disabled = true;
-    sampleButton.disabled = true;
-    clearButton.disabled = true;
+    for (const control of [renderButton, sampleButton, clearButton, shareButton, exportButton, importButton, templateSelect, saveTemplateButton, deleteTemplateButton]) {
+      control.disabled = true;
+    }
   }
 }
 
