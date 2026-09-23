@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gunn Seven-Period Map</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand-mark">G</div>
+      <div>
+        <div class="eyebrow">GUNN CAMPUS MAP</div>
+        <h1>Seven-Period Map</h1>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="editor panel" aria-labelledby="editor-title">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">YOUR SCHEDULE</div>
+            <h2 id="editor-title">Set Up Your Periods</h2>
+          </div>
+          <button id="sample-button" class="text-button" type="button">Load Example</button>
+        </div>
+        <form id="period-form" novalidate>
+          <div id="period-list" class="period-list"></div>
+          <div class="form-actions">
+            <button id="render-button" class="primary-button" type="submit">Generate Map <span aria-hidden="true">↗</span></button>
+            <span id="status" class="status" role="status" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="preview panel" aria-labelledby="preview-title">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">MAP PREVIEW</div>
+            <h2 id="preview-title">Final Map</h2>
+          </div>
+          <a id="download-link" class="download-link is-disabled" href="#" download="gunn-period-map.png" aria-disabled="true">Download PNG</a>
+        </div>
+        <div class="map-frame">
+          <img id="map-image" src="/map.png" alt="Original Gunn campus map; selected rooms will appear highlighted after generation" />
+        </div>
+        <div id="legend" class="legend" aria-label="Highlighted rooms"></div>
+        <p id="warning" class="warning" role="status"></p>
+      </section>
+    </main>
+  </body>
+</html>
