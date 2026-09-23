@@ -347,8 +347,7 @@ templateSelect.addEventListener("change", loadSelectedTemplate);
 saveTemplateButton.addEventListener("click", saveTemplate);
 deleteTemplateButton.addEventListener("click", deleteSelectedTemplate);
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function generateMap() {
   renderButton.disabled = true;
   status.textContent = "Generating map…";
   status.classList.remove("error");
@@ -377,6 +376,18 @@ form.addEventListener("submit", async (event) => {
   } finally {
     renderButton.disabled = false;
   }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  generateMap();
+});
+
+downloadLink.addEventListener("click", async (event) => {
+  if (!downloadLink.classList.contains("is-disabled")) return;
+  event.preventDefault();
+  await generateMap();
+  if (!downloadLink.classList.contains("is-disabled")) downloadLink.click();
 });
 
 mapImage.addEventListener("click", () => window.open(mapImage.src, "_blank", "noopener"));
