@@ -125,4 +125,4 @@ fragment so it can be opened without server-side storage, while **Save Current**
 stores multiple named templates in the browser.
 The existing **Generate Map** action still sends the current form to the local
 `/api/render` endpoint to produce the preview. The generated PNG includes a
-period legend below the campus map.
+period legend in the open lower-left area of the map.
