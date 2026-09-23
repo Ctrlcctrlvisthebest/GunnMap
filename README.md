@@ -118,3 +118,45 @@ the sample schedule; period 7 stays blank because its Bow Gym room is unspecifie
 Room suggestions include second-floor N rooms. The two `K6` areas use their
 separate choices `K6 (R069)` and `K6 (R070)`. If a room appears more than once,
 the last selected period controls its map color and the page shows a warning.
+
+## Evacuation reference map
+
+After generating a schedule map, click a numbered classroom marker, the
+highlighted room itself, or its period chip beneath the map. A dialog shows
+that room's fire assembly group and destination, with a detail of the supplied
+evacuation map highlighting the group's printed label. Marker numbers match
+the period numbers. Repeated periods in one room share a marker and destination;
+the two distinct K6 rooms retain their separate IDs and map positions.
+
+Changing any schedule input clears the previous map's markers and evacuation
+details until a new map is generated. Results from a request made before an
+edit are discarded. Each generation has its own image URL, so maps open in
+different tabs keep the matching classroom highlights. Period colors are
+independent of assembly groups: for example, `n214` resolves to N214 and the
+football-field section labeled N201–N217 even if its period color is blue.
+
+Room assignments live in `evacuation.py` and follow the explicit ranges in
+the supplied reference. Rooms with no clear assignment show **Needs
+confirmation** without a destination marker. In particular, E01 is not assumed
+to mean E1, and rooms outside the printed N and K ranges are not assigned by
+proximity. No pathfinding or live emergency routing is performed.
+
+Choose **Evacuation Routes** in the header, or visit
+`http://127.0.0.1:8000/evacuation`. This page displays the supplied evacuation
+image unchanged from `src/map/gunn_evacuation_map.png`, independently of the
+schedule editor and room API. It supports zooming from 100% to 400%, scrolling
+within the map, fitting the map to the page, opening the full-size image, and
+downloading the original PNG. The image, text legend, and download remain
+available without JavaScript.
+
+The four color groups transcribe the labels in the supplied image. They are
+not computed routes, and no route is inferred for rooms missing from those
+labels. The reference image has no visible revision date; the page directs
+students to follow current school staff instructions. To update this reference,
+replace the image and review the matching labels in `web/evacuation.html`.
+Review the assignments and label focus rectangles in `evacuation.py` as well.
+Run `python3 -m unittest test_evacuation test_web_app -v` to check room-range
+boundaries, unconfirmed cases, duplicated K6 IDs, reference-map focus coordinates,
+N214 input normalization, and isolation between generated maps.
+Run `node test_frontend_state.cjs` to check that edits, failed requests, and
+requests still in progress cannot leave or restore outdated evacuation details.

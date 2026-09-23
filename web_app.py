@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
+import shutil
 import uuid
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,13 +13,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from map_highlighter import highlight_rooms
+from evacuation import evacuation_for_room
 
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 MAP = ROOT / "src" / "map" / "gunn_site_map.png"
+EVACUATION_MAP = ROOT / "src" / "map" / "gunn_evacuation_map.png"
 OUTPUT = ROOT / "output" / "period_map.png"
-ROOMS = json.loads((ROOT / "room_regions.json").read_text(encoding="utf-8"))["rooms"]
+ROOM_DATA = json.loads((ROOT / "room_regions.json").read_text(encoding="utf-8"))
+ROOMS = ROOM_DATA["rooms"]
 BUILDINGS = sorted({room["building"] for room in ROOMS}, key=lambda name: (name == "BG", name))
 BY_ID = {room["id"].casefold(): room for room in ROOMS}
 BY_BUILDING = defaultdict(list)
@@ -83,16 +86,33 @@ def _render_periods(periods: object) -> dict:
             warnings.append(f"Periods {seen[room['id']]} and {index} both use {room['label']}; the map uses Period {index}'s color.")
         seen[room["id"]] = index
         colors[room["id"]] = color
-        selected.append({"period": index, "id": room["id"], "label": room["label"], "building": building, "floor": room.get("floor", 1), "color": color})
+        selected.append({
+            "period": index, "id": room["id"], "label": room["label"],
+            "building": building, "floor": room.get("floor", 1), "color": color,
+            "polygon": room["polygon"], "evacuation": evacuation_for_room(room),
+            "marker": [(room["label_box"][0] + room["label_box"][2]) / 2,
+                       (room["label_box"][1] + room["label_box"][3]) / 2],
+        })
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    temp = OUTPUT.parent / f".period_map_{uuid.uuid4().hex}.png"
+    render_id = uuid.uuid4().hex
+    image = OUTPUT.parent / f"period_map_{render_id}.png"
+    temp = OUTPUT.parent / f".period_map_{render_id}.png"
+    latest_temp = OUTPUT.parent / f".latest_map_{render_id}.png"
     try:
         highlight_rooms(colors, temp, opacity=0.55)
-        os.replace(temp, OUTPUT)
+        os.replace(temp, image)
+        # Retain the latest-map download for compatibility. Each browser uses
+        # its own immutable image so another tab cannot replace its map.
+        shutil.copyfile(image, latest_temp)
+        os.replace(latest_temp, OUTPUT)
     finally:
         temp.unlink(missing_ok=True)
-    return {"image_url": f"/output/period_map.png?v={time.time_ns()}", "selected": selected, "warnings": warnings}
+        latest_temp.unlink(missing_ok=True)
+    return {
+        "image_url": f"/output/{image.name}",
+        "selected": selected, "warnings": warnings, "map_size": ROOM_DATA["image_size"],
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -114,6 +134,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             return self._file(WEB / "index.html", "text/html; charset=utf-8")
+        if path in {"/evacuation", "/evacuation/"}:
+            return self._file(WEB / "evacuation.html", "text/html; charset=utf-8")
+        if path == "/evacuation.js":
+            return self._file(WEB / "evacuation.js", "text/javascript; charset=utf-8")
+        if path == "/evacuation-map.png":
+            return self._file(EVACUATION_MAP, "image/png")
         if path == "/app.js":
             return self._file(WEB / "app.js", "text/javascript; charset=utf-8")
         if path == "/style.css":
@@ -122,6 +148,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(MAP, "image/png")
         if path == "/output/period_map.png":
             return self._file(OUTPUT, "image/png")
+        if re.fullmatch(r"/output/period_map_[0-9a-f]{32}\.png", path):
+            return self._file(OUTPUT.parent / Path(path).name, "image/png")
         if path == "/api/rooms":
             data = {
                 "buildings": BUILDINGS,
