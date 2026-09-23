@@ -7,7 +7,7 @@ The small reference crop came from the user's supplied N-building image.
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 MAP_DIR = Path(__file__).resolve().parent / "src" / "map"
@@ -74,6 +74,21 @@ def build_n_map() -> Path:
             fill="black",
             width=2,
         )
+
+    # The label copied from the reference is blurred by the screenshot
+    # transform. Redraw it at the map's native resolution so the D in BLDG
+    # stays distinct from an O when the web preview scales the map down.
+    label_box = (1514, 391, 1581, 413)
+    draw.rectangle(label_box, fill="white", outline="black", width=1)
+    try:
+        font = ImageFont.truetype("Arial Bold.ttf", 15)
+    except OSError:
+        font = ImageFont.load_default(size=15)
+    label = "N-BLDG"
+    left, top, right, bottom = draw.textbbox((0, 0), label, font=font)
+    text_x = (label_box[0] + label_box[2] - (right - left)) / 2 - left
+    text_y = (label_box[1] + label_box[3] - (bottom - top)) / 2 - top
+    draw.text((text_x, text_y), label, font=font, fill="black")
 
     base.convert("RGB").save(DESTINATION)
     return DESTINATION
