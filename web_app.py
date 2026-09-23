@@ -8,8 +8,8 @@ import re
 import time
 import uuid
 from collections import defaultdict
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from html import escape
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -67,21 +67,28 @@ def _add_schedule_legend(image_path: Path, selected: list[dict]) -> None:
     padding = 24
     header_height = 42
     row_height = 34
+    legend_width = 420
     legend_height = padding * 2 + header_height + row_height * len(selected)
-    canvas = Image.new("RGB", (map_image.width, map_image.height + legend_height), "white")
-    canvas.paste(map_image, (0, 0))
+    legend_left = max(padding, min(420, map_image.width - legend_width - padding))
+    legend_top = map_image.height - legend_height - padding
+    canvas = map_image.copy()
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.load_default(size=26)
     row_font = ImageFont.load_default(size=22)
-    legend_top = map_image.height
-    draw.text((padding, legend_top + padding), "Schedule Legend", fill="#182334", font=font)
+    draw.rectangle(
+        (legend_left, legend_top, legend_left + legend_width, legend_top + legend_height),
+        fill="white",
+        outline="#d0d5dd",
+        width=2,
+    )
+    draw.text((legend_left + padding, legend_top + padding), "Schedule Legend", fill="#182334", font=font)
     for index, item in enumerate(selected):
         y = legend_top + padding + header_height + index * row_height
-        draw.rectangle((padding, y + 4, padding + 22, y + 26), fill=ImageColor.getcolor(item["color"], "RGB"))
+        draw.rectangle((legend_left + padding, y + 4, legend_left + padding + 22, y + 26), fill=ImageColor.getcolor(item["color"], "RGB"))
         label = f"Period {item['period']} · {item['label']}"
         if item.get("floor") == 2:
             label += " (2F)"
-        draw.text((padding + 34, y), label, fill="#344054", font=row_font)
+        draw.text((legend_left + padding + 34, y), label, fill="#344054", font=row_font)
     canvas.save(image_path, format="PNG")
 
 
@@ -147,10 +154,8 @@ class Handler(BaseHTTPRequestHandler):
             source_name = path.removeprefix("/__source/")
             source_path = {
                 "app.js": WEB / "app.js",
-                "index.html": WEB / "index.html",
                 "style.css": WEB / "style.css",
                 "web_app.py": ROOT / "web_app.py",
-                "map_highlighter.py": ROOT / "map_highlighter.py",
                 "README.md": ROOT / "README.md",
             }.get(source_name)
             if source_path is None or not source_path.is_file():
