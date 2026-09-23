@@ -166,7 +166,7 @@ h2 { margin-top: 4px; font-size: 21px; letter-spacing: -.02em; }
   white-space: nowrap;
 }
 .download-link:hover:not(.is-disabled) { background: #f4f6f9; }
-.download-link.is-disabled { color: #a9b3c0; pointer-events: none; }
+.download-link.is-disabled { color: #a9b3c0; }
 .map-frame {
   display: flex;
   align-items: center;
