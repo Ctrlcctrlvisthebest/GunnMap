@@ -15,9 +15,6 @@ const renderButton = document.querySelector("#render-button");
 const sampleButton = document.querySelector("#sample-button");
 const clearButton = document.querySelector("#clear-button");
 const shareButton = document.querySelector("#share-button");
-const exportButton = document.querySelector("#export-button");
-const importButton = document.querySelector("#import-button");
-const importInput = document.querySelector("#import-input");
 const templateSelect = document.querySelector("#template-select");
 const saveTemplateButton = document.querySelector("#save-template-button");
 const deleteTemplateButton = document.querySelector("#delete-template-button");
@@ -195,18 +192,20 @@ function findRoom(period) {
 }
 
 function duplicateWarningText(periods = readPeriods()) {
-  const seen = new Map();
-  const messages = [];
+  const groups = new Map();
   periods.forEach((period, index) => {
     const room = findRoom(period);
     if (!room) return;
-    if (seen.has(room.id)) {
-      messages.push(`Periods ${seen.get(room.id)} and ${index + 1} both use ${room.label}; the map uses Period ${index + 1}'s color.`);
-    } else {
-      seen.set(room.id, index + 1);
-    }
+    const group = groups.get(room.id) || { room, periods: [] };
+    group.periods.push(index + 1);
+    groups.set(room.id, group);
   });
-  return messages.join(" ");
+  return [...groups.values()]
+    .filter(({ periods: selectedPeriods }) => selectedPeriods.length > 1)
+    .map(({ room, periods: selectedPeriods }) => (
+      `Periods ${selectedPeriods.join(", ")} share ${room.label}; each color fills 1/${selectedPeriods.length} of the room.`
+    ))
+    .join(" ");
 }
 
 function updateDuplicateWarnings() {
@@ -281,37 +280,6 @@ async function shareSchedule() {
   status.classList.remove("error");
 }
 
-function exportSchedule() {
-  const payload = JSON.stringify({ version: 1, periods: readPeriods() }, null, 2);
-  const objectUrl = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = "gunnmap-schedule.json";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(objectUrl);
-  status.textContent = "Schedule exported.";
-  status.classList.remove("error");
-}
-
-async function importSchedule(file) {
-  try {
-    const value = JSON.parse(await file.text());
-    const periods = value && value.version === 1 ? value.periods : value;
-    if (!isValidPeriods(periods)) throw new Error("That file is not a valid GunnMap schedule.");
-    applyPeriods(periods);
-    saveDraft();
-    status.textContent = "Schedule imported.";
-    status.classList.remove("error");
-  } catch (error) {
-    status.textContent = error.message || "Could not import that schedule.";
-    status.classList.add("error");
-  } finally {
-    importInput.value = "";
-  }
-}
-
 function saveTemplate() {
   const defaultName = `Schedule ${loadTemplates().length + 1}`;
   const enteredName = window.prompt("Name this schedule template:", defaultName);
@@ -375,12 +343,6 @@ clearButton.addEventListener("click", () => {
 });
 
 shareButton.addEventListener("click", shareSchedule);
-exportButton.addEventListener("click", exportSchedule);
-importButton.addEventListener("click", () => importInput.click());
-importInput.addEventListener("change", () => {
-  const [file] = importInput.files;
-  if (file) importSchedule(file);
-});
 templateSelect.addEventListener("change", loadSelectedTemplate);
 saveTemplateButton.addEventListener("click", saveTemplate);
 deleteTemplateButton.addEventListener("click", deleteSelectedTemplate);
@@ -445,7 +407,7 @@ async function init() {
   } catch (error) {
     status.textContent = error.message;
     status.classList.add("error");
-    for (const control of [renderButton, sampleButton, clearButton, shareButton, exportButton, importButton, templateSelect, saveTemplateButton, deleteTemplateButton]) {
+    for (const control of [renderButton, sampleButton, clearButton, shareButton, templateSelect, saveTemplateButton, deleteTemplateButton]) {
       control.disabled = true;
     }
   }
