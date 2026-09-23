@@ -23,13 +23,17 @@
             <div class="eyebrow">YOUR SCHEDULE</div>
             <h2 id="editor-title">Set Up Your Periods</h2>
           </div>
-          <button id="sample-button" class="text-button" type="button">Load Example</button>
+          <div class="panel-actions">
+            <button id="sample-button" class="text-button" type="button">Load Example</button>
+            <button id="clear-button" class="text-button" type="button">Clear Schedule</button>
+          </div>
         </div>
         <form id="period-form" novalidate>
           <div id="period-list" class="period-list"></div>
           <div class="form-actions">
             <button id="render-button" class="primary-button" type="submit">Generate Map <span aria-hidden="true">↗</span></button>
             <span id="status" class="status" role="status" aria-live="polite"></span>
+            <span id="draft-status" class="draft-status" role="status" aria-live="polite"></span>
           </div>
         </form>
       </section>
