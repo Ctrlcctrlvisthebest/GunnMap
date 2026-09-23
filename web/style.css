@@ -173,3 +173,80 @@ h2 { margin-top: 4px; font-size: 21px; letter-spacing: -.02em; }
   .field input[type="color"] { height: 79px; }
   .map-frame { min-height: 220px; }
 }
+
+/* Navigation shared by the schedule and evacuation maps. */
+.site-header { flex-wrap: wrap; }
+.site-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.site-nav a { padding: 11px 14px; border-radius: 9px; color: #526176; text-decoration: none; font-size: 14px; font-weight: 700; }
+.site-nav a:hover { background: #f2f5f8; }
+.site-nav a[aria-current="page"] { color: #8e1f2e; background: #a1253510; }
+a:focus-visible, button:focus-visible, .evacuation-viewport:focus-visible { outline: 3px solid #a12535; outline-offset: 3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.evacuation-layout { display: grid; gap: 22px; max-width: 1900px; margin: 0 auto; padding: 25px clamp(20px, 4vw, 60px) 50px; }
+.reference-notice { padding: 14px 18px; border: 1px solid #e8d5ad; border-radius: 10px; background: #fff9ed; color: #6b4d17; font-size: 14px; line-height: 1.6; }
+.evacuation-panel { padding: 25px; }
+.evacuation-panel .panel-heading { flex-wrap: wrap; }
+.map-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.zoom-controls { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+.zoom-controls[hidden] { display: none; }
+.zoom-controls button { min-width: 44px; min-height: 44px; padding: 8px 13px; border: 1px solid #d8e0e9; border-radius: 8px; color: #303f55; background: #fff; font-weight: 700; }
+.zoom-controls button:hover:not(:disabled) { background: #f2f5f8; }
+.zoom-controls button:disabled { opacity: .4; cursor: default; }
+.zoom-controls output { min-width: 54px; text-align: center; font-size: 14px; font-variant-numeric: tabular-nums; }
+.map-help, .map-caption { color: #657287; font-size: 13px; line-height: 1.6; }
+.map-help { margin-top: 12px; }
+.map-caption { margin-top: 12px; }
+.evacuation-viewport { margin-top: 12px; width: 100%; max-height: 72vh; overflow: auto; border: 1px solid #e4e9f0; border-radius: 11px; background: #fff; }
+.evacuation-viewport img { display: block; width: 100%; max-width: none; height: auto; }
+.route-groups-heading { margin: 5px 0 16px; }
+.route-groups-heading p { margin-top: 8px; color: #657287; font-size: 14px; line-height: 1.6; }
+.route-groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.route-group { padding: 20px; border-top: 4px solid var(--route-color); }
+.route-group h3 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 16px; }
+.route-swatch { width: 12px; height: 12px; border-radius: 50%; background: var(--route-color); flex-shrink: 0; }
+.route-group ul { margin: 13px 0 0; padding-left: 20px; color: #42516a; font-size: 14px; line-height: 1.9; }
+.route-group p { margin-top: 10px; color: #657287; font-size: 12px; line-height: 1.6; }
+.route-red { --route-color: #ed3425; }
+.route-blue { --route-color: #304cff; }
+.route-green { --route-color: #268322; }
+.route-black { --route-color: #202329; }
+
+/* Room locations align to the same reference coordinates as the rendered PNG. */
+.interactive-map { position: relative; width: 100%; line-height: 0; }
+.room-hit-areas, .room-leaders, .room-markers { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.room-hit-areas polygon { fill: transparent; pointer-events: auto; cursor: pointer; }
+.room-hit-areas polygon:hover { fill: #ffffff55; stroke: #182334; stroke-width: 3px; }
+.room-leaders line { stroke-width: 2; stroke-linecap: round; }
+.room-leaders circle { stroke: #fff; stroke-width: 1; }
+.room-marker { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; min-width: 36px; height: 36px; padding: 0 5px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 18px; background: #fff; color: #182334; box-shadow: 0 0 0 2px var(--period-color), 0 2px 6px #0004; font-size: 12px; font-weight: 800; line-height: 1; }
+.room-marker:hover, .room-marker:focus-visible { z-index: 1; background: #fff5f6; }
+.legend button { min-height: 44px; text-align: left; }
+.legend button:hover { border-color: #a12535; background: #fff5f6; }
+.room-dialog { width: min(650px, calc(100% - 28px)); max-height: calc(100dvh - 32px); margin: auto; padding: 25px; overflow: auto; border: 1px solid #e0e6ee; border-radius: 20px; color: #182334; background: #fff; box-shadow: 0 20px 80px #18233444; }
+.room-dialog::backdrop { background: #18233499; }
+.room-dialog .panel-heading { align-items: flex-start; }
+.dialog-close { width: 44px; height: 44px; border: 1px solid #d8e0e9; border-radius: 50%; background: #fff; color: #334155; font-size: 26px; }
+.assembly-details { margin-top: 20px; }
+.assembly-badge { display: inline-block; padding: 5px 10px; border: 1px solid var(--assembly-color); border-left: 5px solid var(--assembly-color); border-radius: 6px; color: #334155; font-size: 12px; font-weight: 700; text-transform: capitalize; }
+.assembly-details h3 { margin: 12px 0 8px; font-size: 22px; line-height: 1.3; }
+.assembly-details p { margin-top: 8px; font-size: 14px; line-height: 1.6; color: #526176; }
+.assembly-location { margin: 18px 0 0; }
+.assembly-location svg { display: block; width: 100%; max-height: 38dvh; border: 1px solid #e0e6ee; border-radius: 10px; background: #fafbfc; }
+.assembly-location figcaption { margin-top: 7px; color: #657287; font-size: 12px; line-height: 1.5; }
+.assembly-full-map { display: inline-block; margin-top: 15px; }
+
+@media (max-width: 1000px) {
+  .route-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .site-nav { width: 100%; margin-left: 0; }
+  .site-nav a { flex: 1; text-align: center; }
+}
+@media (max-width: 600px) {
+  .evacuation-layout { gap: 15px; padding: 15px; }
+  .evacuation-panel { padding: 17px; }
+  .route-groups { grid-template-columns: 1fr; gap: 12px; }
+  .map-links { margin-top: 3px; }
+  .room-dialog { padding: 18px; }
+}

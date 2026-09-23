@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gunn Evacuation Routes</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/evacuation.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand-mark">G</div>
+      <div>
+        <div class="eyebrow">GUNN CAMPUS MAP</div>
+        <h1>Evacuation Routes</h1>
+      </div>
+      <nav class="site-nav" aria-label="Campus maps">
+        <a href="/">Schedule Map</a>
+        <a href="/evacuation" aria-current="page">Evacuation Routes</a>
+      </nav>
+    </header>
+
+    <main class="evacuation-layout">
+      <p class="reference-notice"><strong>Reference map.</strong> Follow current school staff instructions during an emergency. This supplied image does not show a revision date.</p>
+
+      <section class="panel evacuation-panel" aria-labelledby="evacuation-title">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">ROUTES &amp; ASSEMBLY AREAS</div>
+            <h2 id="evacuation-title">Campus Evacuation Map</h2>
+          </div>
+          <div class="map-links">
+            <a class="download-link" href="/evacuation-map.png" target="_blank" rel="noopener">Open Full Size <span class="sr-only">(new tab)</span></a>
+            <a class="download-link" href="/evacuation-map.png" download="gunn-evacuation-map.png">Download PNG</a>
+          </div>
+        </div>
+        <div id="zoom-controls" class="zoom-controls" role="group" aria-label="Map zoom" hidden>
+          <button id="zoom-out" type="button" aria-label="Zoom out" aria-controls="evacuation-image" disabled>−</button>
+          <output id="zoom-level" aria-live="polite">100%</output>
+          <button id="zoom-in" type="button" aria-label="Zoom in" aria-controls="evacuation-image">+</button>
+          <button id="zoom-fit" type="button" aria-controls="evacuation-image">Fit map</button>
+        </div>
+        <p id="map-help" class="map-help">Zoom in to read room labels. Scroll or swipe within the map to explore it.</p>
+        <div id="evacuation-viewport" class="evacuation-viewport" role="region" aria-label="Scrollable evacuation map" aria-describedby="map-help" tabindex="0">
+          <img id="evacuation-image" src="/evacuation-map.png" alt="Gunn campus evacuation reference with red, blue, green and black marked paths and room group labels. The same room groups are listed below." />
+        </div>
+        <p class="map-caption">Original supplied map, reproduced unchanged. The room groups below transcribe its colored labels; they do not assign routes to unlisted rooms.</p>
+      </section>
+
+      <section aria-labelledby="route-groups-title">
+        <div class="route-groups-heading">
+          <div class="eyebrow">READ THE MAP</div>
+          <h2 id="route-groups-title">Room Groups by Color</h2>
+          <p>Match your room to a group, then check the marked paths and assembly layout in the image.</p>
+        </div>
+        <div class="route-groups">
+          <article class="panel route-group route-red">
+            <h3><span class="route-swatch" aria-hidden="true"></span>Red markings</h3>
+            <ul>
+              <li>H1–H3, H4–H5</li>
+              <li>G1–G3, G4–G7</li>
+              <li>F1–F2, F4–F6</li>
+              <li>PREP</li>
+            </ul>
+          </article>
+          <article class="panel route-group route-blue">
+            <h3><span class="route-swatch" aria-hidden="true"></span>Blue markings</h3>
+            <ul>
+              <li>M1–M5</li>
+              <li>P105, P115, P117</li>
+              <li>S101, S102, S121</li>
+              <li>S147</li>
+            </ul>
+          </article>
+          <article class="panel route-group route-green">
+            <h3><span class="route-swatch" aria-hidden="true"></span>Green markings</h3>
+            <ul>
+              <li>E1–E2; C4–C8; C1–C3</li>
+              <li>D, B, A</li>
+              <li>Bow Gym, Titan Gym</li>
+              <li>K1–K5, K6–K13</li>
+              <li>L1–L4, L5–L8</li>
+            </ul>
+          </article>
+          <article class="panel route-group route-black">
+            <h3><span class="route-swatch" aria-hidden="true"></span>Black markings</h3>
+            <ul>
+              <li>J1–J5, J6–J10</li>
+              <li>N201–N217</li>
+              <li>N101–N117</li>
+            </ul>
+            <p>These group labels appear on the football field in the image.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
