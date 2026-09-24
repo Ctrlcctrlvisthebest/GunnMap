@@ -25,7 +25,7 @@
 
 ## GitHub account and main branch
 
-- For requests involving a pull request (for example, “帮我提 PR”), merging, or changing `main`, check the currently authenticated GitHub account with `gh api user --jq .login` before taking any action that would merge into or directly update `main`.
+- For requests involving a pull request (for example, “help me create PR”), merging, or changing `main`, check the currently authenticated GitHub account with `gh api user --jq .login` before taking any action that would merge into or directly update `main`.
 - Only merge a pull request into `main` or push changes directly to `main` when that command returns exactly `Ijustneedanid` or `XmCCC-glitch`. Check again immediately before the merge or push; a Git commit author, email address, or remote URL is not proof of the authenticated account.
 - If the account cannot be verified or does not match either allowed login, do not merge or push to `main`. Explain the result to the user and leave any prepared pull request open for an authorized account to merge.
 
