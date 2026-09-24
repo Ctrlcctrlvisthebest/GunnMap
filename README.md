@@ -1,6 +1,6 @@
 # GunnMap
 
-An unofficial campus map for Henry M. Gunn High School, powered by Node.js and TypeScript. No Python runtime is required.
+An unofficial campus map for Henry M. Gunn High School. Browser interactions, the Node.js server, map tools, and tests are written in TypeScript. No Python runtime is required.
 
 ![Seven-period map editor](output/demo_ui.png)
 
@@ -20,11 +20,13 @@ npm run build
 npm start -- --port 8000
 ```
 
-The server binds to `127.0.0.1` by default. Set `HOST` and `PORT` to configure it. Compiled files live in `dist/`; keep the repository's `web/`, JSON data, and `src/map/` assets alongside that directory when deploying.
+The server binds to `127.0.0.1` by default. Set `HOST` and `PORT` to configure it. `npm run dev` compiles the browser TypeScript before starting the server. After editing browser code, run `npm run build:web` and reload the page, or restart the development server.
+
+Compiled files live in `dist/`, including the browser modules in `dist/web/`. `npm run build` compiles both the server and browser code; keep the repository's `web/` HTML and CSS, JSON data, and `src/map/` assets alongside that directory when deploying. The browser loads generated JavaScript modules from `/app.js` and `/evacuation.js`.
 
 ## Classroom map and evacuation information
 
-Choose a building, room, and color for each of seven periods. Unused slots may remain blank. Generate Map produces a downloadable PNG with individual classroom highlights. Click a classroom, numbered marker, or period chip to see its assembly destination and the corresponding label on the supplied evacuation reference.
+Enter a room and color for each of seven periods. A recognized room label or ID automatically selects its building; you can also choose a building manually. Unused slots may remain blank. Generate Map produces a downloadable PNG with individual classroom highlights. Click a classroom, numbered marker, or period chip to see its assembly destination and the corresponding label on the supplied evacuation reference.
 
 Your draft is saved in browser cookies and restored after reload. Clear Schedule clears the draft and preview. Save Current creates a named template; templates can be loaded or deleted. Share Link encodes the seven period selections in the URL so the recipient can load the same schedule. These features use this browser's storage, not a user account or cloud database.
 
@@ -64,4 +66,4 @@ npm test
 npm run build
 ```
 
-Tests cover room normalization, N214's football-field destination, explicit range boundaries, unknown assignments, duplicate K6 IDs, multi-color room rendering, PNG legends, independent image URLs, API validation, static routes, and the browser's draft/template/share and stale-request handling. The existing browser interface remains vanilla JavaScript; server, rendering, data matching, and command-line tools are TypeScript.
+Tests cover room normalization and automatic building selection, N214's football-field destination, explicit range boundaries, unknown assignments, duplicate K6 IDs, multi-color room rendering, PNG legends, independent image URLs, API validation, compiled browser routes, and the browser's draft/template/share and stale-request handling. `npm test` builds the browser modules before running the TypeScript tests. Both the server and browser TypeScript configurations enable strict type checking.

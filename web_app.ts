@@ -84,8 +84,8 @@ export function createApp(outputDir=resolve(ROOT,'output')) {
       if(pathname==='/favicon.ico') {res.writeHead(204);res.end();return;}
       const files:Record<string,[string,string]>={
         '/':['web/index.html','text/html; charset=utf-8'], '/evacuation':['web/evacuation.html','text/html; charset=utf-8'],
-        '/evacuation/':['web/evacuation.html','text/html; charset=utf-8'], '/app.js':['web/app.js','text/javascript; charset=utf-8'],
-        '/evacuation.js':['web/evacuation.js','text/javascript; charset=utf-8'], '/style.css':['web/style.css','text/css; charset=utf-8'],
+        '/evacuation/':['web/evacuation.html','text/html; charset=utf-8'], '/app.js':['dist/web/app.js','text/javascript; charset=utf-8'],
+        '/evacuation.js':['dist/web/evacuation.js','text/javascript; charset=utf-8'], '/style.css':['web/style.css','text/css; charset=utf-8'],
         '/map.png':['src/map/gunn_site_map.png','image/png'], '/evacuation-map.png':['src/map/gunn_evacuation_map.png','image/png']};
       let file=files[pathname];
       if(/^\/output\/period_map(?:_[0-9a-f]{32})?\.png$/.test(pathname)) file=[resolve(outputDir,pathname.split('/').pop()!),'image/png'];

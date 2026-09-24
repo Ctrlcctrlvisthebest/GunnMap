@@ -7,11 +7,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node --import tsx web_app.ts",
-    "build": "tsc",
+    "dev": "npm run build:web && node --import tsx web_app.ts",
+    "build:web": "tsc -p tsconfig.web.json",
+    "build": "tsc && npm run build:web",
     "start": "node dist/web_app.js",
-    "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test_*.ts && node --test test_frontend_state.cjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "npm run build:web && node --import tsx --test test_*.ts",
     "highlight": "node --import tsx map_cli.ts",
     "map:index": "node --import tsx map_cli.ts --index",
     "map:rebuild": "node --import tsx build_n_map.ts",
