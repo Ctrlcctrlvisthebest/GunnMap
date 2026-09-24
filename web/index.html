@@ -14,6 +14,10 @@
         <div class="eyebrow">GUNN CAMPUS MAP</div>
         <h1>Seven-Period Map</h1>
       </div>
+      <nav class="site-nav" aria-label="Campus maps">
+        <a href="/" aria-current="page">Schedule Map</a>
+        <a href="/evacuation">Evacuation Routes</a>
+      </nav>
     </header>
 
     <main class="layout">
@@ -56,11 +60,68 @@
           <a id="download-link" class="download-link is-disabled" href="#" download="gunn-period-map.png" aria-disabled="true">Download PNG</a>
         </div>
         <div class="map-frame">
-          <img id="map-image" src="/map.png" alt="Original Gunn campus map; selected rooms will appear highlighted after generation" />
+          <div class="interactive-map">
+            <img id="map-image" src="/map.png" alt="Original Gunn campus map; selected rooms will appear highlighted after generation" />
+            <svg id="room-hit-areas" class="room-hit-areas" aria-hidden="true"></svg>
+            <div id="room-markers" class="room-markers"></div>
+          </div>
         </div>
+        <p id="room-click-help" class="map-help" hidden>Marker colors identify class periods; shared rooms show every period's color. Click a classroom marker or a room below for its fire assembly location. Click the map background to view the full-size PNG.</p>
         <div id="legend" class="legend" aria-label="Highlighted rooms"></div>
         <p id="warning" class="warning" role="status"></p>
       </section>
     </main>
+
+    <dialog id="template-dialog" class="room-dialog template-dialog" aria-labelledby="template-dialog-title">
+      <h2 id="template-dialog-title">Save Schedule Template</h2>
+      <form id="template-form" method="dialog">
+        <label class="field template-name-field" for="template-name">
+          <span>Template name</span>
+          <input id="template-name" type="text" maxlength="60" required autocomplete="off" autofocus />
+        </label>
+        <p id="template-message" class="warning" role="alert"></p>
+        <div class="form-actions">
+          <button class="primary-button" type="submit">Save Template</button>
+          <button id="cancel-template-button" class="text-button" type="button">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-template-dialog" class="room-dialog template-dialog" aria-labelledby="delete-template-title" aria-describedby="delete-template-description">
+      <h2 id="delete-template-title">Delete Template</h2>
+      <p id="delete-template-description" class="map-help"></p>
+      <p id="delete-template-message" class="warning" role="alert"></p>
+      <form id="delete-template-form" method="dialog" class="form-actions">
+        <button class="primary-button" type="submit">Delete Template</button>
+        <button id="cancel-delete-template-button" class="text-button" type="button" autofocus>Cancel</button>
+      </form>
+    </dialog>
+
+    <dialog id="room-evacuation" class="room-dialog" aria-labelledby="room-dialog-title" aria-describedby="assembly-destination assembly-note">
+      <div class="panel-heading">
+        <div>
+          <div class="eyebrow">FIRE EVACUATION</div>
+          <h2 id="room-dialog-title"></h2>
+          <p id="room-dialog-periods" class="map-help"></p>
+        </div>
+        <form method="dialog"><button class="dialog-close" aria-label="Close evacuation details" autofocus>×</button></form>
+      </div>
+      <div class="assembly-details">
+        <span id="assembly-group" class="assembly-badge"></span>
+        <h3 id="assembly-destination"></h3>
+        <p id="assembly-reference"></p>
+        <p id="assembly-note"></p>
+      </div>
+      <figure id="assembly-location" class="assembly-location" hidden>
+        <svg id="assembly-map" role="img" aria-labelledby="assembly-map-title" viewBox="0 0 1852 1156">
+          <title id="assembly-map-title">Assembly group on the supplied evacuation map</title>
+          <image href="/evacuation-map.png" width="1852" height="1156" />
+          <rect id="assembly-focus" fill="none" stroke-width="4" vector-effect="non-scaling-stroke" />
+        </svg>
+        <figcaption>Box marks your group's label on the supplied reference map.</figcaption>
+      </figure>
+      <p class="map-help">Follow current school staff instructions during an emergency.</p>
+      <a class="download-link assembly-full-map" href="/evacuation" target="_blank" rel="noopener">View full evacuation map ↗</a>
+    </dialog>
   </body>
 </html>

@@ -3,3 +3,5 @@ __pycache__/
 .playwright-cli/
 output/*
 !output/demo_*.png
+node_modules/
+dist/
