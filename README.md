@@ -1,35 +1,26 @@
 # GunnMap
 
-An unofficial campus map prototype for Henry M. Gunn High School.
+GunnMap is an unofficial local tool for coloring rooms on the Henry M. Gunn High School campus map. Build a downloadable map for a seven-period schedule through the web page, Python, or the command line.
 
 ![Seven-period map editor](output/demo_ui.png)
 
-This Python prototype highlights individual labeled rooms on the original
-school map. `room_regions.json` stores 146 active room polygons with stable
-unique IDs. `room_index.csv` lists each ID, map label, building, and any special
-purpose. The first page of the
-[2025–26 site map](https://resources.finalsite.net/images/v1737500165/pausdorg/zmi9kqvwvpzd975e09bz/GunnSiteMap2025-26.pdf)
-is the background. The earlier six large areas remain available in
-`building_regions.json`.
+## Quick start
 
-Map files live in `src/map/`: the source PDF, its clean page-one PNG, the
-user-supplied N-building reference crop, the augmented PNG used by the
-highlighter, and the English schedule reference image. Generated previews live in
-`output/`. Rebuild the augmented PNG from its sources with
-`.venv/bin/python build_n_map.py`.
-
-The second-floor N-building overlay and its room highlights are shown in
-[this validation image](output/demo_n_second_floor.png). A seven-period result
-is available as [a sample map](output/demo_seven_period_map.png).
-
-Install the only dependency:
+From the repository root, use Python 3.10 or newer to install [Pillow](requirements.txt) and start the local server:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python web_app.py --port 8000
 ```
 
-Call the room highlighter from another `main.py`:
+Open <http://127.0.0.1:8000/>. Choose a building, enter a room, and pick a color for each period. Leave unused periods blank, or select **Load Example** to fill periods 1–6. Select **Generate Map** to preview and download the PNG. The latest render is also written to `output/period_map.png`.
+
+The page runs on your computer and serves requests through the local `/api/render` endpoint. If a room is selected in more than one period, the last period sets its color and the page shows a warning.
+
+## Generate a map from Python
+
+Run this example from the repository root:
 
 ```python
 from map_highlighter import highlight_rooms
@@ -40,81 +31,39 @@ highlight_rooms(
 )
 ```
 
-Three-room color check:
-
-```python
-highlight_rooms(
-    {"C6": "#e53935", "library": "#fb8c00", "F2": "#43a047"},
-    "output/c6_library_f2.png",
-    opacity=0.5,
-)
-```
-
-The dictionary keys select map labels or unique IDs such as `R006`; values set
-colors. The map prints `K6` in two places, so choose its ID from
-`room_index.csv`. `library` selects `D-LIB`. The aliases `boys`, `yoga`, `girls`, and
-`gender neutral` select BG111, BG117, and BG138 respectively.
-Color names and hex
-colors accepted by Pillow work. `opacity=0.35` is the default; adjust it
-between 0 and 1. Unselected areas stay unchanged. The input image is never
-overwritten. Coordinates scale automatically if `base_image` uses a different
-resolution of the same uncropped map.
-
-Command-line example:
+You can also use the command line:
 
 ```bash
 .venv/bin/python map_highlighter.py --rooms output/example.png 'A134=#ff595e' 'B117=#1982c4'
 ```
 
-To produce the numbered review map:
+[room_index.csv](room_index.csv) lists room labels and stable `R` IDs; [room_regions.json](room_regions.json) contains aliases and polygons. `library` selects `D-LIB`, `boys` selects `BG111`, `yoga` selects `BG117`, and `girls` or `gender neutral` selects `BG138`.
 
-```python
-from map_highlighter import create_room_index_image
-create_room_index_image("output/numbered_room_index.png")
-```
+The map contains two rooms labeled `K6`, so use `R069` or `R070` to choose one. Pillow color names and hex colors are accepted. The default `opacity` is `0.35`; valid values are greater than `0` and at most `1`.
 
-The active index covers labeled rooms outside V, including the N-building
-second-floor rooms N200–N217 and N223 transcribed from the supplied reference.
-It excludes Titan Gym, Spangenberg Theater S130, and all Bow Gym spaces except BG111 (boys), BG138
-(girls / gender neutral), and BG117 (yoga). The pool and other sports facilities
-are not selectable. Room IDs remain stable, so the sequence has gaps where
-rooms were excluded. Some suites on the source map lack a line between adjacent
-labels; their separate highlight areas use the visible layout to divide the
-shared space. `room_regions.json` is editable for a later precision pass.
+## Sample schedule
 
-## Seven-stop schedule preview
-
-Render the English schedule from `src/map/MAP-English.png` on the original site map:
+`schedule_preview.py` renders the fixed seven-stop example represented in [MAP-English.png](src/map/MAP-English.png). It does not read the schedule from that image. Stop 7 is labeled only “Bow Gym,” so it stays unhighlighted until a specific mapped room is supplied:
 
 ```bash
 .venv/bin/python schedule_preview.py output/schedule_preview.png
+.venv/bin/python schedule_preview.py output/schedule_preview_bg111.png --bow-gym-room BG111
 ```
 
-Stops 1–6 highlight F4, M3, J3, K1, N110, and N211. N211 is on the second
-floor and uses the room outline from the supplied N-building reference. The
-schedule says only “Bow Gym” for stop 7. Once its room is known, add one of the
-three mapped spaces:
+The other supported Bow Gym choices are `BG117` and `BG138`. This preview script loads Arial from the macOS system font directory; the web page and room highlighter do not use that font path.
+
+## Map data and coverage
+
+The working map is based on page 1 of the [2025–26 Gunn site map](https://resources.finalsite.net/images/v1737500165/pausdorg/zmi9kqvwvpzd975e09bz/GunnSiteMap2025-26.pdf). [room_regions.json](room_regions.json) contains 146 selectable room polygons, including N-building second-floor rooms N200–N217 and N223. [building_regions.json](building_regions.json) contains the earlier building-level regions, which can be rendered with `highlight_buildings` in `map_highlighter.py`.
+
+The room index excludes V rooms, Titan Gym, Spangenberg Theater S130, the pool, and most other athletic areas. Some adjacent rooms on the source map have no visible dividing line, so their polygon boundaries are approximate. The source PDF and clean page-one PNG are preserved in `src/map/`; `build_n_map.py` rebuilds the augmented `src/map/gunn_site_map.png` from the clean image and the N-building reference crop:
 
 ```bash
-.venv/bin/python schedule_preview.py output/schedule_preview.png --bow-gym-room BG111
+.venv/bin/python build_n_map.py
 ```
 
-The other supported choices are `BG138` and `BG117`.
+See the [N-building validation image](output/demo_n_second_floor.png) and [sample seven-period map](output/demo_seven_period_map.png) for rendered results. Generated images belong in `output/`; the repository tracks only the `demo_*.png` examples there.
 
-## Local seven-period page
+## License
 
-Start the local Python server and open the address it prints:
-
-```bash
-.venv/bin/python web_app.py --port 8000
-```
-
-At `http://127.0.0.1:8000/`, choose a building, type a room, and pick a color
-for each of the seven periods. Unused periods may be blank. Click **Generate
-Map** to preview the result and download a PNG. The latest image is also saved
-at `output/period_map.png`. The **Load Example** button fills periods 1–6 with
-the sample schedule; period 7 stays blank because its Bow Gym room is unspecified.
-
-Room suggestions include second-floor N rooms. The two `K6` areas use their
-separate choices `K6 (R069)` and `K6 (R070)`. If a room appears more than once,
-the last selected period controls its map color and the page shows a warning.
+The project code is released under the [MIT License](LICENSE). The campus map comes from the linked school district PDF.
