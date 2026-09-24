@@ -14,7 +14,7 @@ is the background. The earlier six large areas remain available in
 
 Map files live in `src/map/`: the source PDF, its clean page-one PNG, the
 user-supplied N-building reference crop, the augmented PNG used by the
-highlighter, and the two earlier reference images. Generated previews live in
+highlighter, and the English schedule reference image. Generated previews live in
 `output/`. Rebuild the augmented PNG from its sources with
 `.venv/bin/python build_n_map.py`.
 
@@ -44,7 +44,7 @@ Three-room color check:
 
 ```python
 highlight_rooms(
-    {"C6": "#e53935", "图书馆": "#fb8c00", "F2": "#43a047"},
+    {"C6": "#e53935", "library": "#fb8c00", "F2": "#43a047"},
     "output/c6_library_f2.png",
     opacity=0.5,
 )
@@ -52,8 +52,8 @@ highlight_rooms(
 
 The dictionary keys select map labels or unique IDs such as `R006`; values set
 colors. The map prints `K6` in two places, so choose its ID from
-`room_index.csv`. `图书馆` and `library` both select `D-LIB`. The aliases `男生`,
-`女生`, `gender neutral`, and `瑜伽` select BG111, BG138, and BG117 respectively.
+`room_index.csv`. `library` selects `D-LIB`. The aliases `boys`, `yoga`, `girls`, and
+`gender neutral` select BG111, BG117, and BG138 respectively.
 Color names and hex
 colors accepted by Pillow work. `opacity=0.35` is the default; adjust it
 between 0 and 1. Unselected areas stay unchanged. The input image is never

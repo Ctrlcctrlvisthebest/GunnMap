@@ -61,7 +61,7 @@ def highlight_buildings(
 ) -> Path:
     """Save a PNG with selected buildings highlighted in caller-provided colors.
 
-    Example: highlight_buildings({"A": "#ff5a5f", "图书馆": "blue"}, "result.png")
+    Example: highlight_buildings({"A": "#ff5a5f", "Library": "blue"}, "result.png")
     Names are case-insensitive. The source map is never modified.
     """
     regions_file = Path(regions_path)

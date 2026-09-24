@@ -54,7 +54,7 @@ def _resolve_room(building: str, value: str) -> dict:
     if not matches:
         raise ValueError(f"Room {value!r} was not found in {building} Building")
     if len(matches) > 1:
-        choices = "、".join(f"{room['label']} ({room['id']})" for room in matches)
+        choices = ", ".join(f"{room['label']} ({room['id']})" for room in matches)
         raise ValueError(f"{value} appears twice on the map. Choose {choices}")
     return matches[0]
 
