@@ -1,3 +1,36 @@
+export {};
+
+type Point = [number, number];
+interface Period { building: string; room: string; color: string }
+interface ScheduleDraft { version: 1; periods: Period[] }
+interface ScheduleTemplate { name: string; periods: Period[] }
+interface Room { id: string; label: string; building: string; floor?: number; aliases?: string[] }
+interface Evacuation {
+  status: 'mapped' | 'unconfirmed'; group: string | null; color: string | null;
+  destination: string; reference_label: string | null; note: string;
+  focus: { x: number; y: number; width: number; height: number } | null;
+}
+interface SelectedRoom extends Room {
+  period: number; color: string; polygon: Point[]; marker: Point; evacuation: Evacuation;
+}
+interface RoomGroup extends SelectedRoom { periods: number[]; colors: string[] }
+interface RenderResult { image_url: string; selected: SelectedRoom[]; warnings: string[]; map_size: Point }
+interface ActiveRender { revision: number; promise: Promise<boolean> }
+interface MarkerEntry {
+  marker: HTMLElement; room: RoomGroup; anchorX: number; anchorY: number;
+  halfWidth: number; halfHeight: number;
+}
+interface Position { x: number; y: number }
+
+function query<T extends Element = HTMLElement>(selector: string, parent: ParentNode = document): T {
+  const element = parent.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing page element: ${selector}`);
+  return element;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 const PERIOD_COLORS = ["#e11d48", "#7c3aed", "#0284c7", "#059669", "#f97316", "#d4a017", "#dc2626"];
 const DRAFT_COOKIE_NAME = "gunnmap_schedule_draft";
 const TEMPLATES_COOKIE_NAME = "gunnmap_schedule_templates";
@@ -9,57 +42,57 @@ const EXAMPLE = [
   ["N", "N110"], ["N", "N211"], ["", ""],
 ];
 
-const form = document.querySelector("#period-form");
-const list = document.querySelector("#period-list");
-const status = document.querySelector("#status");
-const renderButton = document.querySelector("#render-button");
-const sampleButton = document.querySelector("#sample-button");
-const clearButton = document.querySelector("#clear-button");
-const shareButton = document.querySelector("#share-button");
-const templateSelect = document.querySelector("#template-select");
-const saveTemplateButton = document.querySelector("#save-template-button");
-const deleteTemplateButton = document.querySelector("#delete-template-button");
-const templateDialog = document.querySelector("#template-dialog");
-const templateName = document.querySelector("#template-name");
-const templateMessage = document.querySelector("#template-message");
-const deleteTemplateDialog = document.querySelector("#delete-template-dialog");
-const mapImage = document.querySelector("#map-image");
-const downloadLink = document.querySelector("#download-link");
-const legend = document.querySelector("#legend");
-const warning = document.querySelector("#warning");
-const draftStatus = document.querySelector("#draft-status");
-const roomMarkers = document.querySelector("#room-markers");
-const roomHitAreas = document.querySelector("#room-hit-areas");
-const evacuationDialog = document.querySelector("#room-evacuation");
+const form = query<HTMLFormElement>("#period-form");
+const list = query("#period-list");
+const status = query("#status");
+const renderButton = query<HTMLButtonElement>("#render-button");
+const sampleButton = query<HTMLButtonElement>("#sample-button");
+const clearButton = query<HTMLButtonElement>("#clear-button");
+const shareButton = query<HTMLButtonElement>("#share-button");
+const templateSelect = query<HTMLSelectElement>("#template-select");
+const saveTemplateButton = query<HTMLButtonElement>("#save-template-button");
+const deleteTemplateButton = query<HTMLButtonElement>("#delete-template-button");
+const templateDialog = query<HTMLDialogElement>("#template-dialog");
+const templateName = query<HTMLInputElement>("#template-name");
+const templateMessage = query("#template-message");
+const deleteTemplateDialog = query<HTMLDialogElement>("#delete-template-dialog");
+const mapImage = query<HTMLImageElement>("#map-image");
+const downloadLink = query<HTMLAnchorElement>("#download-link");
+const legend = query("#legend");
+const warning = query("#warning");
+const draftStatus = query("#draft-status");
+const roomMarkers = query("#room-markers");
+const roomHitAreas = query("#room-hit-areas");
+const evacuationDialog = query<HTMLDialogElement>("#room-evacuation");
 const SVG_NS = "http://www.w3.org/2000/svg";
-const interactiveMap = document.querySelector(".interactive-map");
+const interactiveMap = query(".interactive-map");
 const roomLeaders = document.createElementNS(SVG_NS, "svg");
 roomLeaders.classList.add("room-leaders");
 roomLeaders.setAttribute("aria-hidden", "true");
 interactiveMap.insertBefore(roomLeaders, roomMarkers);
 
-let rooms = [];
-let buildings = [];
-let selectedRooms = new Map();
-let markerMapSize = [1, 1];
+let rooms: Room[] = [];
+let buildings: string[] = [];
+let selectedRooms = new Map<string, RoomGroup>();
+let markerMapSize: Point = [1, 1];
 let markerLayoutFrame = 0;
 let scheduleRevision = 0;
-let activeRender = null;
+let activeRender: ActiveRender | null = null;
 let pendingDownload = false;
 let roomsLoaded = false;
 let pendingTemplateDeletion = "";
 
-function showDraftStatus(message, isError = false) {
+function showDraftStatus(message: string, isError = false) {
   draftStatus.textContent = message;
   draftStatus.classList.toggle("error", isError);
 }
 
-function isValidPeriods(periods) {
+function isValidPeriods(periods: unknown): periods is Period[] {
   return Boolean(
     Array.isArray(periods) &&
       periods.length === 7 &&
       periods.every((period) => (
-        period &&
+        isRecord(period) &&
         typeof period.building === "string" &&
         typeof period.room === "string" &&
         typeof period.color === "string" &&
@@ -68,11 +101,11 @@ function isValidPeriods(periods) {
   );
 }
 
-function isValidDraft(value) {
-  return Boolean(value && value.version === 1 && isValidPeriods(value.periods));
+function isValidDraft(value: unknown): value is ScheduleDraft {
+  return isRecord(value) && value.version === 1 && isValidPeriods(value.periods);
 }
 
-function getCookie(name) {
+function getCookie(name: string) {
   const encodedName = encodeURIComponent(name);
   const entry = document.cookie.split("; ").find((item) => item.startsWith(`${encodedName}=`));
   if (!entry) return null;
@@ -83,14 +116,14 @@ function getCookie(name) {
   }
 }
 
-function setCookie(name, value) {
+function setCookie(name: string, value: string) {
   const encodedName = encodeURIComponent(name);
   const encodedValue = encodeURIComponent(value);
   document.cookie = `${encodedName}=${encodedValue}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
   return getCookie(name) === value;
 }
 
-function removeCookie(name) {
+function removeCookie(name: string) {
   document.cookie = `${encodeURIComponent(name)}=; max-age=0; path=/; SameSite=Lax`;
 }
 
@@ -107,7 +140,7 @@ function loadDraft() {
   try {
     const saved = getCookie(DRAFT_COOKIE_NAME);
     if (!saved) return null;
-    const draft = JSON.parse(saved);
+    const draft: unknown = JSON.parse(saved);
     if (!isValidDraft(draft)) {
       removeCookie(DRAFT_COOKIE_NAME);
       return null;
@@ -127,16 +160,16 @@ function clearDraft() {
   }
 }
 
-function loadTemplates() {
+function loadTemplates(): ScheduleTemplate[] {
   try {
     const saved = getCookie(TEMPLATES_COOKIE_NAME);
     if (!saved) return [];
-    const templates = JSON.parse(saved);
+    const templates: unknown = JSON.parse(saved);
     if (!Array.isArray(templates)) return [];
-    return templates.filter((template) => (
-      template &&
+    return templates.filter((template): template is ScheduleTemplate => (
+      isRecord(template) &&
       typeof template.name === "string" &&
-      template.name.trim() &&
+      template.name.trim().length > 0 &&
       isValidPeriods(template.periods)
     ));
   } catch {
@@ -144,7 +177,7 @@ function loadTemplates() {
   }
 }
 
-function saveTemplates(templates) {
+function saveTemplates(templates: ScheduleTemplate[]) {
   try {
     return setCookie(TEMPLATES_COOKIE_NAME, JSON.stringify(templates.slice(0, 8)));
   } catch {
@@ -169,7 +202,7 @@ function invalidatePreview(message = "Schedule changed. Generate Map to update r
   roomLeaders.replaceChildren();
   legend.replaceChildren();
   updateDuplicateWarnings();
-  document.querySelector("#room-click-help").hidden = true;
+  query("#room-click-help").hidden = true;
   if (mapImage.getAttribute("src") !== "/map.png") mapImage.src = "/map.png";
   mapImage.alt = "Original Gunn campus map; generate an updated map for this schedule";
   downloadLink.href = "#";
@@ -203,29 +236,30 @@ function layoutRoomMarkers() {
   roomLeaders.replaceChildren();
   if (!width || !height || !selectedRooms.size) return;
   roomLeaders.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  const entries = [...roomMarkers.children].map((marker) => {
-    const room = selectedRooms.get(marker.dataset.roomId);
-    return {
+  const entries = (Array.from(roomMarkers.children) as HTMLElement[]).flatMap((marker): MarkerEntry[] => {
+    const room = selectedRooms.get(marker.dataset.roomId ?? "");
+    if (!room) return [];
+    return [{
       marker, room,
       anchorX: room.marker[0] / markerMapSize[0] * width,
       anchorY: room.marker[1] / markerMapSize[1] * height,
       halfWidth: marker.offsetWidth / 2,
       halfHeight: marker.offsetHeight / 2,
-    };
+    }];
   });
   const centerX = entries.reduce((total, item) => total + item.anchorX, 0) / entries.length;
   const centerY = entries.reduce((total, item) => total + item.anchorY, 0) / entries.length;
-  const placed = [];
+  const placed: (MarkerEntry & Position)[] = [];
   const gap = 6;
   const edge = 4;
-  const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, Math.max(min, max)));
 
   for (const [index, entry] of entries.entries()) {
-    const clampPoint = (x, y) => ({
+    const clampPoint = (x: number, y: number) => ({
       x: clamp(x, entry.halfWidth + edge, width - entry.halfWidth - edge),
       y: clamp(y, entry.halfHeight + edge, height - entry.halfHeight - edge),
     });
-    const fits = (point, protectAnchors) => {
+    const fits = (point: Position, protectAnchors: boolean) => {
       if (placed.some((other) =>
         Math.abs(point.x - other.x) < entry.halfWidth + other.halfWidth + gap &&
         Math.abs(point.y - other.y) < entry.halfHeight + other.halfHeight + gap)) return false;
@@ -238,7 +272,7 @@ function layoutRoomMarkers() {
     const outwardAngle = entry.anchorX === centerX && entry.anchorY === centerY
       ? index * Math.PI * 2 / entries.length
       : Math.atan2(entry.anchorY - centerY, entry.anchorX - centerX);
-    let position;
+    let position: Position | undefined;
     for (const protectAnchors of [true, false]) {
       const anchor = clampPoint(entry.anchorX, entry.anchorY);
       if (fits(anchor, protectAnchors)) position = anchor;
@@ -287,18 +321,19 @@ function scheduleMarkerLayout() {
 new ResizeObserver(scheduleMarkerLayout).observe(interactiveMap);
 mapImage.addEventListener("load", scheduleMarkerLayout);
 
-function openEvacuation(room) {
+function openEvacuation(room: RoomGroup | undefined) {
+  if (!room) return;
   const info = room.evacuation;
-  document.querySelector("#room-dialog-title").textContent = `${room.label}${room.floor === 2 ? " · 2nd floor" : ""}`;
-  document.querySelector("#room-dialog-periods").textContent = `Period${room.periods.length > 1 ? "s" : ""} ${room.periods.join(", ")}`;
-  const badge = document.querySelector("#assembly-group");
+  query("#room-dialog-title").textContent = `${room.label}${room.floor === 2 ? " · 2nd floor" : ""}`;
+  query("#room-dialog-periods").textContent = `Period${room.periods.length > 1 ? "s" : ""} ${room.periods.join(", ")}`;
+  const badge = query("#assembly-group");
   badge.textContent = info.status === "mapped" ? `${info.group} assembly group` : "Needs confirmation";
   badge.style.setProperty("--assembly-color", info.color || "#66758b");
-  document.querySelector("#assembly-destination").textContent = info.destination;
-  const reference = document.querySelector("#assembly-reference");
+  query("#assembly-destination").textContent = info.destination;
+  const reference = query("#assembly-reference");
   reference.textContent = info.reference_label ? `Your group on the map: ${info.reference_label}` : "";
-  document.querySelector("#assembly-note").textContent = info.note;
-  const location = document.querySelector("#assembly-location");
+  query("#assembly-note").textContent = info.note;
+  const location = query("#assembly-location");
   location.hidden = !info.focus;
   if (info.focus) {
     const sourceWidth = 1852;
@@ -307,7 +342,7 @@ function openEvacuation(room) {
     const y = info.focus.y * sourceHeight;
     const width = info.focus.width * sourceWidth;
     const height = info.focus.height * sourceHeight;
-    const focus = document.querySelector("#assembly-focus");
+    const focus = query("#assembly-focus");
     for (const [name, value] of Object.entries({x, y, width, height, stroke: info.color})) {
       focus.setAttribute(name, String(value));
     }
@@ -316,13 +351,13 @@ function openEvacuation(room) {
     const cropHeight = Math.min(sourceHeight, Math.max(430, height + 250));
     const cropX = Math.max(0, Math.min(x + width / 2 - cropWidth / 2, sourceWidth - cropWidth));
     const cropY = Math.max(0, Math.min(y + height / 2 - cropHeight / 2, sourceHeight - cropHeight));
-    document.querySelector("#assembly-map").setAttribute("viewBox", `${cropX} ${cropY} ${cropWidth} ${cropHeight}`);
-    document.querySelector("#assembly-map-title").textContent = `${room.label}: ${info.reference_label} group on the evacuation reference`;
+    query("#assembly-map").setAttribute("viewBox", `${cropX} ${cropY} ${cropWidth} ${cropHeight}`);
+    query("#assembly-map-title").textContent = `${room.label}: ${info.reference_label} group on the evacuation reference`;
   }
   evacuationDialog.showModal();
 }
 
-function showRoomTargets(selected, mapSize) {
+function showRoomTargets(selected: SelectedRoom[], mapSize: Point) {
   roomMarkers.replaceChildren();
   roomHitAreas.replaceChildren();
   roomLeaders.replaceChildren();
@@ -364,65 +399,87 @@ function showRoomTargets(selected, mapSize) {
     marker.addEventListener("click", () => openEvacuation(room));
     roomMarkers.append(marker);
   }
-  document.querySelector("#room-click-help").hidden = selected.length === 0;
+  query("#room-click-help").hidden = selected.length === 0;
   layoutRoomMarkers();
 }
 
-function buildingName(code) {
+function buildingName(code: string) {
   if (code === "BG") return "Bow Gym";
   if (code === "D") return "D Building / Library";
   return `${code} Building`;
 }
 
-function updateSuggestions(card, clearRoom = true) {
-  const building = card.querySelector("select").value;
-  const input = card.querySelector('input[type="text"]');
-  const dataList = card.querySelector("datalist");
+function updateSuggestions(card: HTMLElement, clearRoom = true) {
+  const building = query<HTMLSelectElement>("select", card).value;
+  const input = query<HTMLInputElement>('input[type="text"]', card);
+  const dataList = query<HTMLDataListElement>("datalist", card);
   if (clearRoom) input.value = "";
   dataList.replaceChildren();
-  if (!building) return;
-
-  const candidates = rooms.filter((room) => room.building === building);
-  const counts = new Map();
+  const candidates = rooms.filter((room) => !building || room.building === building);
+  const counts = new Map<string, number>();
   for (const room of candidates) counts.set(room.label, (counts.get(room.label) || 0) + 1);
   for (const room of candidates) {
     const option = document.createElement("option");
-    option.value = counts.get(room.label) > 1 ? `${room.label} (${room.id})` : room.label;
+    option.value = (counts.get(room.label) ?? 0) > 1 ? `${room.label} (${room.id})` : room.label;
     option.label = `${room.id}${room.floor === 2 ? " · 2F" : ""}`;
     dataList.append(option);
   }
 }
 
-function createPeriod(number) {
+function inferBuilding(card: HTMLElement) {
+  const select = query<HTMLSelectElement>("select", card);
+  const name = query<HTMLInputElement>('input[type="text"]', card).value.trim().toUpperCase();
+  const matches = rooms.filter((room) =>
+    [room.id, room.label, `${room.label} (${room.id})`]
+      .some((value) => value.toUpperCase() === name));
+  const candidates = [...new Set(matches.map((room) => room.building))];
+  if (candidates.length === 1) {
+    select.value = candidates[0];
+    card.dataset.autoBuilding = select.value;
+  } else if (card.dataset.autoBuilding) {
+    if (select.value === card.dataset.autoBuilding) select.value = "";
+    delete card.dataset.autoBuilding;
+  }
+  updateSuggestions(card, false);
+}
+
+function createPeriod(number: number) {
   const card = document.createElement("div");
   card.className = "period-card";
   card.dataset.period = String(number);
   card.innerHTML = `
     <div class="period-number"><span>PERIOD</span><strong>${number}</strong></div>
-    <label class="field field-building"><span>Building</span><select aria-label="Period ${number} building"><option value="">Choose a building</option></select></label>
+    <label class="field field-building"><span>Building</span><select aria-label="Period ${number} building"><option value="">Auto-detect from room</option></select></label>
     <label class="field field-room"><span>Room</span><input type="text" list="rooms-${number}" placeholder="e.g. N211" autocomplete="off" aria-label="Period ${number} room"><datalist id="rooms-${number}"></datalist></label>
     <label class="field field-color"><span>Color</span><input type="color" value="${PERIOD_COLORS[number - 1]}" aria-label="Period ${number} color"></label>
   `;
-  const select = card.querySelector("select");
+  const select = query<HTMLSelectElement>("select", card);
   for (const building of buildings) {
     const option = document.createElement("option");
     option.value = building;
     option.textContent = buildingName(building);
     select.append(option);
   }
-  select.addEventListener("change", () => updateSuggestions(card));
+  select.addEventListener("change", () => {
+    delete card.dataset.autoBuilding;
+    updateSuggestions(card);
+  });
+  const roomInput = query<HTMLInputElement>('input[type="text"]', card);
+  roomInput.addEventListener("input", () => inferBuilding(card));
+  roomInput.addEventListener("change", () => inferBuilding(card));
+  updateSuggestions(card, false);
   return card;
 }
 
 function readPeriods() {
-  return [...list.querySelectorAll(".period-card")].map((card) => ({
-    building: card.querySelector("select").value,
-    room: card.querySelector('input[type="text"]').value.trim(),
-    color: card.querySelector('input[type="color"]').value,
+  return [...list.querySelectorAll<HTMLElement>(".period-card")].map((card) => ({
+    building: query<HTMLSelectElement>("select", card).value,
+    room: query<HTMLInputElement>('input[type="text"]', card).value.trim(),
+    color: query<HTMLInputElement>('input[type="color"]', card).value,
   }));
 }
 
-function findRoom(period) {
+function findRoom(period: Period) {
   const building = period.building.trim().toUpperCase();
   const roomName = period.room.trim().toUpperCase();
   if (!building || !roomName) return null;
@@ -433,7 +490,7 @@ function findRoom(period) {
 }
 
 function duplicateWarningText(periods = readPeriods()) {
-  const groups = new Map();
+  const groups = new Map<string, { room: Room; periods: number[] }>();
   periods.forEach((period, index) => {
     const room = findRoom(period);
     if (!room) return;
@@ -453,7 +510,7 @@ function updateDuplicateWarnings() {
   warning.textContent = duplicateWarningText();
 }
 
-function showLegend(selected) {
+function showLegend(selected: SelectedRoom[]) {
   legend.replaceChildren();
   for (const item of selected) {
     const chip = document.createElement("button");
@@ -472,15 +529,16 @@ function showLegend(selected) {
   }
 }
 
-function applyPeriods(periods, { clearShare = true } = {}) {
+function applyPeriods(periods: Period[], { clearShare = true } = {}) {
   periods.forEach((period, index) => {
-    const card = list.children[index];
-    const select = card.querySelector("select");
-    const roomInput = card.querySelector('input[type="text"]');
-    const colorInput = card.querySelector('input[type="color"]');
+    const card = list.children[index] as HTMLElement;
+    const select = query<HTMLSelectElement>("select", card);
+    const roomInput = query<HTMLInputElement>('input[type="text"]', card);
+    const colorInput = query<HTMLInputElement>('input[type="color"]', card);
+    delete card.dataset.autoBuilding;
     select.value = buildings.includes(period.building) ? period.building : "";
-    updateSuggestions(card, false);
-    roomInput.value = select.value ? period.room : "";
+    roomInput.value = period.room;
+    inferBuilding(card);
     colorInput.value = HEX_COLOR.test(period.color) ? period.color : PERIOD_COLORS[index];
   });
   if (clearShare) removeSharedSchedule();
@@ -496,7 +554,7 @@ function loadSharedSchedule() {
   const encoded = new URLSearchParams(hash).get(SHARE_PARAM);
   if (!encoded) return null;
   try {
-    const periods = JSON.parse(encoded);
+    const periods: unknown = JSON.parse(encoded);
     return isValidPeriods(periods) ? periods : null;
   } catch {
     return null;
@@ -523,7 +581,7 @@ function openTemplateDialog() {
   templateName.select();
 }
 
-function saveTemplate(event) {
+function saveTemplate(event: Event) {
   event.preventDefault();
   const name = templateName.value.trim().slice(0, 60);
   if (!name) {
@@ -558,18 +616,18 @@ function confirmTemplateDeletion() {
   const name = templateSelect.value;
   if (!name) return;
   pendingTemplateDeletion = name;
-  document.querySelector("#delete-template-description").textContent = `Delete the “${name}” template? Your current schedule will stay in the editor.`;
-  document.querySelector("#delete-template-message").textContent = "";
+  query("#delete-template-description").textContent = `Delete the “${name}” template? Your current schedule will stay in the editor.`;
+  query("#delete-template-message").textContent = "";
   deleteTemplateDialog.showModal();
 }
 
-function deleteSelectedTemplate(event) {
+function deleteSelectedTemplate(event: Event) {
   event.preventDefault();
   const name = pendingTemplateDeletion;
   if (!name) return;
   const templates = loadTemplates().filter((template) => template.name !== name);
   if (!saveTemplates(templates)) {
-    document.querySelector("#delete-template-message").textContent = "Template could not be deleted in this browser.";
+    query("#delete-template-message").textContent = "Template could not be deleted in this browser.";
     return;
   }
   renderTemplateOptions();
@@ -603,20 +661,20 @@ shareButton.addEventListener("click", shareSchedule);
 templateSelect.addEventListener("change", loadSelectedTemplate);
 saveTemplateButton.addEventListener("click", openTemplateDialog);
 deleteTemplateButton.addEventListener("click", confirmTemplateDeletion);
-document.querySelector("#template-form").addEventListener("submit", saveTemplate);
-document.querySelector("#cancel-template-button").addEventListener("click", () => templateDialog.close());
-document.querySelector("#delete-template-form").addEventListener("submit", deleteSelectedTemplate);
-document.querySelector("#cancel-delete-template-button").addEventListener("click", () => deleteTemplateDialog.close());
+query("#template-form").addEventListener("submit", saveTemplate);
+query("#cancel-template-button").addEventListener("click", () => templateDialog.close());
+query("#delete-template-form").addEventListener("submit", deleteSelectedTemplate);
+query("#cancel-delete-template-button").addEventListener("click", () => deleteTemplateDialog.close());
 deleteTemplateDialog.addEventListener("close", () => { pendingTemplateDeletion = ""; });
 
-async function renderMap(requestRevision, requestedPeriods) {
+async function renderMap(requestRevision: number, requestedPeriods: Period[]) {
   try {
     const response = await fetch("/api/render", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ periods: requestedPeriods }),
     });
-    const result = await response.json();
+    const result = await response.json() as RenderResult & { error?: string };
     if (requestRevision !== scheduleRevision) return false;
     if (!response.ok) throw new Error(result.error || "Map generation failed.");
     const nextImage = new Image();
@@ -633,12 +691,12 @@ async function renderMap(requestRevision, requestedPeriods) {
     showLegend(result.selected);
     status.textContent = result.selected.length ? "Map ready. Click a room for fire evacuation details." : "Map ready.";
     if (window.matchMedia("(max-width: 1100px)").matches) {
-      document.querySelector(".preview").scrollIntoView({ behavior: "smooth", block: "start" });
+      query(".preview").scrollIntoView({ behavior: "smooth", block: "start" });
     }
     return true;
   } catch (error) {
     if (requestRevision === scheduleRevision) {
-      status.textContent = error.message;
+      status.textContent = error instanceof Error ? error.message : String(error);
       status.classList.add("error");
     }
     return false;
@@ -650,14 +708,16 @@ function generateMap() {
   if (activeRender?.revision === scheduleRevision) return activeRender.promise;
   invalidatePreview("Generating map…");
   renderButton.disabled = true;
-  const request = { revision: scheduleRevision };
+  const request: ActiveRender = {
+    revision: scheduleRevision,
+    promise: renderMap(scheduleRevision, readPeriods()).finally(() => {
+      if (activeRender === request) {
+        activeRender = null;
+        renderButton.disabled = false;
+      }
+    }),
+  };
   activeRender = request;
-  request.promise = renderMap(request.revision, readPeriods()).finally(() => {
-    if (activeRender === request) {
-      activeRender = null;
-      renderButton.disabled = false;
-    }
-  });
   return request.promise;
 }
 
@@ -685,7 +745,7 @@ async function init() {
   try {
     const response = await fetch("/api/rooms");
     if (!response.ok) throw new Error("Could not load the room list.");
-    const data = await response.json();
+    const data = await response.json() as { rooms: Room[]; buildings: string[] };
     rooms = data.rooms;
     buildings = data.buildings;
     for (let number = 1; number <= 7; number += 1) list.append(createPeriod(number));
@@ -705,7 +765,7 @@ async function init() {
       showDraftStatus("Your schedule is saved locally as you edit it.");
     }
   } catch (error) {
-    status.textContent = error.message;
+    status.textContent = error instanceof Error ? error.message : String(error);
     status.classList.add("error");
     for (const control of [renderButton, sampleButton, clearButton, shareButton, templateSelect, saveTemplateButton, deleteTemplateButton]) {
       control.disabled = true;

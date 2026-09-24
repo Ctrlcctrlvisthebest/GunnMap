@@ -1,57 +1,90 @@
-// Execute the real frontend against a small DOM and controllable async I/O.
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { join } = require("node:path");
-const { test } = require("node:test");
-const vm = require("node:vm");
+// Execute the real TypeScript frontend against a small DOM and controllable async I/O.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import vm from "node:vm";
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { ROOT, rooms as inventory } from "./project.js";
+
+interface TestEvent { preventDefault(): void }
+type TestListener = (event: TestEvent) => unknown;
+interface Period { building: string; room: string; color: string }
+interface Draft { version: number; periods: Period[] }
+interface Template { name: string; periods: Period[] }
+interface TestResponse { ok: boolean; json(): Promise<unknown> }
+interface RenderRequest { body: string }
+interface HarnessOptions {
+  renderOnStart?: boolean;
+  cookies?: Record<string, unknown>;
+  hash?: string;
+  cookieWrites?: boolean;
+}
+
+class TestStyle {
+  [property: `--${string}`]: string;
+  left = "";
+  top = "";
+  backgroundColor = "";
+  cursor = "";
+  setProperty(name: `--${string}`, value: string) { this[name] = value; }
+}
 
 class Element {
-  constructor() {
-    this.children = [];
-    this.fields = new Map();
-    this.events = new Map();
-    this.attributes = new Map();
-    this.dataset = {};
-    this.value = "";
-    this.textContent = "";
-    this.open = false;
-    this.clicks = 0;
-    this.clientWidth = 800;
-    this.clientHeight = 518;
-    this.offsetWidth = this.offsetHeight = 36;
-    this.style = { setProperty(name, value) { this[name] = value; } };
-    const classes = new Set();
-    this.classList = {
-      add: (...names) => names.forEach(name => classes.add(name)),
-      remove: (...names) => names.forEach(name => classes.delete(name)),
-      contains: name => classes.has(name),
-      toggle: (name, force) => {
-        const add = force === undefined ? !classes.has(name) : force;
-        if (add) classes.add(name); else classes.delete(name);
-        return add;
-      },
-    };
-  }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
-  insertBefore(child) { this.children.unshift(child); }
-  set innerHTML(value) {
+  children: Element[] = [];
+  fields = new Map<string, Element>();
+  events = new Map<string, TestListener[]>();
+  attributes = new Map<string, string>();
+  dataset: Record<string, string> = {};
+  value = "";
+  textContent = "";
+  className = "";
+  src = "";
+  href = "";
+  hidden = false;
+  disabled = false;
+  open = false;
+  clicks = 0;
+  clientWidth = 800;
+  clientHeight = 518;
+  offsetWidth = 36;
+  offsetHeight = 36;
+  style = new TestStyle();
+  private classes = new Set<string>();
+  classList = {
+    add: (...names: string[]) => names.forEach(name => this.classes.add(name)),
+    remove: (...names: string[]) => names.forEach(name => this.classes.delete(name)),
+    contains: (name: string) => this.classes.has(name),
+    toggle: (name: string, force?: boolean) => {
+      const add = force === undefined ? !this.classes.has(name) : force;
+      if (add) this.classes.add(name); else this.classes.delete(name);
+      return add;
+    },
+  };
+  append(...children: Element[]) { this.children.push(...children); }
+  replaceChildren(...children: Element[]) { this.children = children; }
+  insertBefore(child: Element) { this.children.unshift(child); }
+  set innerHTML(value: string) {
     const color = value.match(/type="color" value="([^"]+)"/);
     if (color) this.querySelector('input[type="color"]').value = color[1];
   }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  getAttribute(name) { return name === "src" ? this.src : this.attributes.get(name); }
-  querySelector(selector) {
-    if (!this.fields.has(selector)) this.fields.set(selector, new Element());
-    return this.fields.get(selector);
+  setAttribute(name: string, value: string) { this.attributes.set(name, String(value)); }
+  getAttribute(name: string) { return name === "src" ? this.src : this.attributes.get(name); }
+  querySelector(selector: string): Element {
+    const existing = this.fields.get(selector);
+    if (existing) return existing;
+    const element = new Element();
+    this.fields.set(selector, element);
+    return element;
   }
   querySelectorAll() { return this.children; }
-  addEventListener(type, listener) {
-    if (!this.events.has(type)) this.events.set(type, []);
-    this.events.get(type).push(listener);
+  addEventListener(type: string, listener: TestListener) {
+    const listeners = this.events.get(type) ?? [];
+    listeners.push(listener);
+    this.events.set(type, listeners);
   }
-  trigger(type) {
-    return Promise.all((this.events.get(type) || []).map(fn => fn({ preventDefault() {} })));
+  trigger(type: string) {
+    return Promise.all((this.events.get(type) ?? []).map(fn => fn({ preventDefault() {} })));
   }
   showModal() { this.open = true; }
   close() { this.open = false; }
@@ -60,16 +93,25 @@ class Element {
   click() { this.clicks += 1; return this.trigger("click"); }
 }
 
-const inventory = JSON.parse(readFileSync(join(__dirname, "room_regions.json"))).rooms;
-const tick = () => new Promise(resolve => setImmediate(resolve));
-const deferred = () => {
-  let resolve;
-  const promise = new Promise(done => { resolve = done; });
+class TestDocument extends Element {
+  createElement() { return new Element(); }
+  createElementNS() { return new Element(); }
+}
+
+const frontendCode = transpileModule(readFileSync(join(ROOT, "web/app.ts"), "utf8"), {
+  compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
+  fileName: "web/app.ts",
+}).outputText;
+const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+const deferred = <T = void>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 };
-const response = (data, ok = true) => ({ ok, json: async () => data });
-function resultFor(label) {
+const response = (data: unknown, ok = true): TestResponse => ({ ok, json: async () => data });
+function resultFor(label: string) {
   const room = inventory.find(item => item.label === label);
+  assert.ok(room, `Missing test room ${label}`);
   return {
     image_url: `/output/${label}.png`, warnings: [], map_size: [2448, 1584],
     selected: [{
@@ -83,19 +125,18 @@ function resultFor(label) {
 const draftCookie = "gunnmap_schedule_draft";
 const templateCookie = "gunnmap_schedule_templates";
 const blankPeriods = () => Array.from({ length: 7 }, () => ({ building: "", room: "", color: "#0284c7" }));
-const scheduleFor = (label) => {
+const scheduleFor = (label: string) => {
   const periods = blankPeriods();
   periods[0] = { building: label[0].toUpperCase(), room: label, color: "#0284c7" };
   return periods;
 };
 
-async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWrites = true } = {}) {
-  const document = new Element();
-  document.createElement = document.createElementNS = () => new Element();
+async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWrites = true }: HarnessOptions = {}) {
+  const document = new TestDocument();
   const cookieJar = new Map(Object.entries(cookies).map(([name, value]) => [name, encodeURIComponent(JSON.stringify(value))]));
   Object.defineProperty(document, "cookie", {
     get: () => [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; "),
-    set: value => {
+    set: (value: string) => {
       if (!cookieWrites) return;
       const [entry] = value.split(";");
       const index = entry.indexOf("=");
@@ -104,30 +145,33 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
       else cookieJar.set(name, entry.slice(index + 1));
     },
   });
-  const get = selector => document.querySelector(selector);
+  const get = (selector: string) => document.querySelector(selector);
   get("#map-image").src = "/map.png";
   get("#download-link").classList.add("is-disabled");
-  const io = { render: async () => response(resultFor("M3")), decode: async () => {}, clipboard: "" };
+  const io: { render: (options: RenderRequest) => Promise<TestResponse>; decode: () => Promise<void>; clipboard: string } = { render: async () => response(resultFor("M3")), decode: async () => {}, clipboard: "" };
   const window = {
     matchMedia: () => ({ matches: false }),
     location: new URL(`http://localhost:8765/${hash}`),
-    history: { replaceState(_state, _title, url) { window.location = new URL(url, window.location); } },
+    history: { replaceState(_state: unknown, _title: string, url: string | URL) { window.location = new URL(url, window.location); } },
     open() {},
   };
-  vm.runInNewContext(readFileSync(join(__dirname, "web/app.js"), "utf8"), {
+  vm.runInNewContext(frontendCode, {
+    exports: {},
     document, URLSearchParams, requestAnimationFrame: () => 1,
     ResizeObserver: class { observe() {} },
     Image: class { decode() { return io.decode(); } },
-    Option: class extends Element { constructor(text, value) { super(); this.textContent = text; this.value = value; } },
+    Option: class extends Element { constructor(text: string, value: string) { super(); this.textContent = text; this.value = value; } },
     window,
-    navigator: { clipboard: { writeText: async text => { io.clipboard = text; } } },
-    fetch: async (url, options) => url === "/api/rooms"
-      ? response({ rooms: inventory, buildings: [...new Set(inventory.map(room => room.building))] })
-      : io.render(options),
-  }, { filename: "web/app.js" });
+    navigator: { clipboard: { writeText: async (text: string) => { io.clipboard = text; } } },
+    fetch: async (url: string, options?: RenderRequest) => {
+      if (url === "/api/rooms") return response({ rooms: inventory, buildings: [...new Set(inventory.map(room => room.building))] });
+      assert.ok(options, "Rendering requires request options");
+      return io.render(options);
+    },
+  }, { filename: "web/app.ts" });
   await tick();
   assert.equal(get("#period-list").children.length, 7);
-  const setRoom = (label, index = 0, color = "#0284c7") => {
+  const setRoom = (label: string, index = 0, color = "#0284c7") => {
     const card = get("#period-list").children[index];
     card.querySelector("select").value = label[0].toUpperCase();
     card.querySelector('input[type="text"]').value = label;
@@ -149,7 +193,12 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
     assert.equal(get("#room-markers").children.length, 1);
     assert.equal(get("#map-image").src, "/output/M3.png");
   }
-  const readCookie = name => cookieJar.has(name) ? JSON.parse(decodeURIComponent(cookieJar.get(name))) : null;
+  function readCookie(name: typeof draftCookie): Draft | null;
+  function readCookie(name: typeof templateCookie): Template[] | null;
+  function readCookie(name: string): Draft | Template[] | null {
+    const encoded = cookieJar.get(name);
+    return encoded === undefined ? null : JSON.parse(decodeURIComponent(encoded)) as Draft | Template[];
+  }
   const readPeriods = () => get("#period-list").children.map(card => ({
     building: card.querySelector("select").value,
     room: card.querySelector('input[type="text"]').value,
@@ -163,6 +212,45 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
   };
   return { get, io, window, readCookie, readPeriods, setRoom, submit, assertCleared, saveTemplate };
 }
+
+test("room entry infers buildings from inventory without altering entered text", async () => {
+  const h = await harness({ renderOnStart: false });
+  const card = h.get("#period-list").children[0];
+  const input = card.querySelector('input[type="text"]');
+  const select = card.querySelector("select");
+  assert.equal(card.querySelector("datalist").children.length, inventory.length);
+  for (const room of inventory) {
+    input.value = ` ${room.label.toLowerCase()} `;
+    await input.trigger("input");
+    assert.equal(select.value, room.building, room.label);
+    assert.equal(input.value, ` ${room.label.toLowerCase()} `);
+  }
+  input.value = "n214";
+  await input.trigger("change");
+  await h.get("#period-form").trigger("change");
+  assert.equal(h.readCookie(draftCookie)!.periods[0].building, "N");
+  for (const value of ["214", "N999", ""]) {
+    input.value = value;
+    await input.trigger("input");
+    assert.equal(select.value, "");
+  }
+  select.value = "N";
+  await select.trigger("change");
+  input.value = "214";
+  await input.trigger("input");
+  assert.equal(select.value, "N", "manual selection remains available for numeric rooms");
+});
+
+test("restored room-only drafts infer a building and clear it when the room becomes invalid", async () => {
+  const periods = blankPeriods();
+  periods[0].room = "n214";
+  const h = await harness({ renderOnStart: false, cookies: { [draftCookie]: { version: 1, periods } } });
+  assert.equal(h.readPeriods()[0].building, "N");
+  const input = h.get("#period-list").children[0].querySelector('input[type="text"]');
+  input.value = "N999";
+  await input.trigger("input");
+  assert.equal(h.readPeriods()[0].building, "");
+});
 
 for (const event of ["input", "change"]) {
   test(`${event} clears old M3 details before N214 is regenerated`, async () => {
@@ -200,7 +288,7 @@ test("failed regeneration never leaves old room targets or downloads", async () 
 
 test("editing while a response is pending discards the old response", async () => {
   const h = await harness();
-  const pending = deferred();
+  const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
   const submit = h.submit();
   h.setRoom("n214");
@@ -233,6 +321,7 @@ test("editing saves a draft that restores all seven periods and colors", async (
   h.setRoom("M3", 2, "#059669");
   await h.get("#period-form").trigger("input");
   const draft = h.readCookie(draftCookie);
+  assert.ok(draft);
   assert.deepEqual(draft.periods, h.readPeriods());
   const restored = await harness({ renderOnStart: false, cookies: { [draftCookie]: draft } });
   assert.deepEqual(restored.readPeriods(), draft.periods);
@@ -249,7 +338,7 @@ test("clear removes the draft and shared URL without deleting saved templates", 
   await h.get("#clear-button").trigger("click");
   assert.equal(h.readCookie(draftCookie), null);
   assert.equal(h.window.location.hash, "");
-  assert.equal(h.readCookie(templateCookie).length, 1);
+  assert.equal(h.readCookie(templateCookie)!.length, 1);
   assert.ok(h.readPeriods().every(period => !period.building && !period.room));
   h.assertCleared();
 });
@@ -266,11 +355,11 @@ test("saving, loading and deleting a named template preserves evacuation freshne
   h.get("#template-select").value = "Monday";
   await h.get("#template-select").trigger("change");
   assert.equal(h.readPeriods()[0].room, "N214");
-  assert.equal(h.readCookie(draftCookie).periods[0].room, "N214");
+  assert.equal(h.readCookie(draftCookie)!.periods[0].room, "N214");
   h.assertCleared();
   await h.get("#delete-template-button").trigger("click");
   assert.equal(h.get("#delete-template-dialog").open, true);
-  assert.equal(h.readCookie(templateCookie).length, 1);
+  assert.equal(h.readCookie(templateCookie)!.length, 1);
   await h.get("#delete-template-form").trigger("submit");
   assert.deepEqual(h.readCookie(templateCookie), []);
   assert.equal(h.get("#delete-template-button").disabled, true);
@@ -279,7 +368,7 @@ test("saving, loading and deleting a named template preserves evacuation freshne
 
 test("template loads discard old render responses as well as rendered markers", async () => {
   const h = await harness({ cookies: { [templateCookie]: [{ name: "Field", periods: scheduleFor("N214") }] } });
-  const pending = deferred();
+  const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
   const submission = h.submit();
   h.get("#template-select").value = "Field";
@@ -306,7 +395,7 @@ test("shared schedules round-trip and take precedence over the local draft", asy
   restored.setRoom("N211");
   await restored.get("#period-form").trigger("input");
   assert.equal(restored.window.location.hash, "");
-  assert.equal(restored.readCookie(draftCookie).periods[0].room, "N211");
+  assert.equal(restored.readCookie(draftCookie)!.periods[0].room, "N211");
 });
 
 test("invalid saved and shared data cannot break initialization", async () => {
@@ -359,7 +448,7 @@ test("download generates a current PNG once even while Generate Map is pending",
   const h = await harness();
   h.setRoom("N214");
   await h.get("#period-form").trigger("input");
-  const pending = deferred();
+  const pending = deferred<TestResponse>();
   let requests = 0;
   h.io.render = () => { requests += 1; return pending.promise; };
   const submission = h.submit();
@@ -375,7 +464,7 @@ test("download generates a current PNG once even while Generate Map is pending",
 test("editing during automatic download never downloads the stale image", async () => {
   const h = await harness();
   await h.get("#period-form").trigger("input");
-  const pending = deferred();
+  const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
   const download = h.get("#download-link").trigger("click");
   h.setRoom("N214");
@@ -402,5 +491,5 @@ test("template dialogs allow cancellation and require an explicit delete confirm
   await h.get("#delete-template-button").trigger("click");
   await h.get("#cancel-delete-template-button").trigger("click");
   assert.equal(h.get("#delete-template-dialog").open, false);
-  assert.equal(h.readCookie(templateCookie).length, 1);
+  assert.equal(h.readCookie(templateCookie)!.length, 1);
 });

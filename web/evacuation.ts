@@ -1,13 +1,22 @@
-const viewport = document.querySelector("#evacuation-viewport");
-const evacuationImage = document.querySelector("#evacuation-image");
-const zoomIn = document.querySelector("#zoom-in");
-const zoomOut = document.querySelector("#zoom-out");
-const zoomFit = document.querySelector("#zoom-fit");
-const zoomLevel = document.querySelector("#zoom-level");
+export {};
+
+function requiredElement<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) throw new Error(`Missing evacuation page element: ${selector}`);
+  return element;
+}
+
+const viewport = requiredElement<HTMLDivElement>("#evacuation-viewport");
+const evacuationImage = requiredElement<HTMLImageElement>("#evacuation-image");
+const zoomIn = requiredElement<HTMLButtonElement>("#zoom-in");
+const zoomOut = requiredElement<HTMLButtonElement>("#zoom-out");
+const zoomFit = requiredElement<HTMLButtonElement>("#zoom-fit");
+const zoomLevel = requiredElement<HTMLOutputElement>("#zoom-level");
+const zoomControls = requiredElement<HTMLDivElement>("#zoom-controls");
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4];
 let zoomIndex = 0;
 
-function setZoom(nextIndex) {
+function setZoom(nextIndex: number): void {
   const oldScale = ZOOM_STEPS[zoomIndex];
   zoomIndex = Math.max(0, Math.min(nextIndex, ZOOM_STEPS.length - 1));
   const scale = ZOOM_STEPS[zoomIndex];
@@ -26,4 +35,4 @@ function setZoom(nextIndex) {
 zoomIn.addEventListener("click", () => setZoom(zoomIndex + 1));
 zoomOut.addEventListener("click", () => setZoom(zoomIndex - 1));
 zoomFit.addEventListener("click", () => setZoom(0));
-document.querySelector("#zoom-controls").hidden = false;
+zoomControls.hidden = false;

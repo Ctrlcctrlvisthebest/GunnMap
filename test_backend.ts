@@ -99,6 +99,14 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   assert.equal((await fetch(base+'/api/render',{method:'POST',body:'{'})).status,400);
   assert.equal((await fetch(base+'/api/render',{method:'POST',body:'x'.repeat(16001)})).status,400);
   for(const path of ['/','/app.js','/style.css','/evacuation','/evacuation.js','/evacuation-map.png','/map.png']) assert.equal((await fetch(base+path)).status,200,path);
+  for(const name of ['app','evacuation']) {
+   const script=await fetch(`${base}/${name}.js`);
+   assert.match(script.headers.get('content-type')??'',/^text\/javascript/);
+   assert.equal(await script.text(),await readFile(join(ROOT,'dist','web',`${name}.js`),'utf8'));
+   const page=await (await fetch(base+(name==='app'?'/':'/evacuation'))).text();
+   assert.match(page,new RegExp(`<script type="module" src="/${name}\\.js"></script>`));
+   assert.equal((await fetch(`${base}/${name}.ts`)).status,404);
+  }
   for(const path of ['/output/../room_regions.json','/output/period_map_bad.png','/output/period_map_'+ 'a'.repeat(32)+'.png']) assert.equal((await fetch(base+path)).status,404,path);
  } finally {await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await rm(dir,{recursive:true,force:true});}
 });
