@@ -251,12 +251,17 @@ a:focus-visible, button:focus-visible, .evacuation-viewport:focus-visible { outl
 .room-hit-areas polygon:hover { fill: #ffffff55; stroke: #182334; stroke-width: 3px; }
 .room-leaders line { stroke-width: 2; stroke-linecap: round; }
 .room-leaders circle { stroke: #fff; stroke-width: 1; }
-.room-marker { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; min-width: 36px; height: 36px; padding: 0 5px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 18px; background: #fff; color: #182334; box-shadow: 0 0 0 2px var(--period-color), 0 2px 6px #0004; font-size: 12px; font-weight: 800; line-height: 1; }
-.room-marker:hover, .room-marker:focus-visible { z-index: 1; background: #fff5f6; }
+.room-marker { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; min-width: 36px; height: 36px; padding: 0 7px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 18px; background: var(--period-colors, var(--period-color)); color: #182334; box-shadow: 0 0 0 1px #18233444, 0 2px 6px #0004; font-size: 12px; font-weight: 800; line-height: 1; }
+.room-marker::before { content: ""; position: absolute; inset: 3px; border-radius: 14px; background: #fff; }
+.room-marker span { position: relative; }
+.room-marker:hover, .room-marker:focus-visible { z-index: 1; }
+.room-marker:hover::before, .room-marker:focus-visible::before { background: #fff5f6; }
 .legend button { min-height: 44px; text-align: left; }
 .legend button:hover { border-color: #a12535; background: #fff5f6; }
 .room-dialog { width: min(650px, calc(100% - 28px)); max-height: calc(100dvh - 32px); margin: auto; padding: 25px; overflow: auto; border: 1px solid #e0e6ee; border-radius: 20px; color: #182334; background: #fff; box-shadow: 0 20px 80px #18233444; }
 .room-dialog::backdrop { background: #18233499; }
+.template-dialog { max-width: 460px; }
+.template-name-field { margin-top: 20px; }
 .room-dialog .panel-heading { align-items: flex-start; }
 .dialog-close { width: 44px; height: 44px; border: 1px solid #d8e0e9; border-radius: 50%; background: #fff; color: #334155; font-size: 26px; }
 .assembly-details { margin-top: 20px; }
