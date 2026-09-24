@@ -1,0 +1,29 @@
+{
+  "name": "gunnmap",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --import tsx web_app.ts",
+    "build": "tsc",
+    "start": "node dist/web_app.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test_*.ts && node --test test_frontend_state.cjs",
+    "highlight": "node --import tsx map_cli.ts",
+    "map:index": "node --import tsx map_cli.ts --index",
+    "map:rebuild": "node --import tsx build_n_map.ts",
+    "map:preview": "node --import tsx schedule_preview.ts",
+    "map:validate": "node --import tsx n_floor_validation.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
