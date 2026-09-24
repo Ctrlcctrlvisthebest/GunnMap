@@ -1,6 +1,7 @@
 const PERIOD_COLORS = ["#e11d48", "#7c3aed", "#0284c7", "#059669", "#f97316", "#d4a017", "#dc2626"];
-const DRAFT_STORAGE_KEY = "gunnmap.schedule-draft.v1";
-const TEMPLATES_STORAGE_KEY = "gunnmap.schedule-templates.v1";
+const DRAFT_COOKIE_NAME = "gunnmap_schedule_draft";
+const TEMPLATES_COOKIE_NAME = "gunnmap_schedule_templates";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const SHARE_PARAM = "schedule";
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const EXAMPLE = [
@@ -50,9 +51,31 @@ function isValidDraft(value) {
   return Boolean(value && value.version === 1 && isValidPeriods(value.periods));
 }
 
+function getCookie(name) {
+  const encodedName = encodeURIComponent(name);
+  const entry = document.cookie.split("; ").find((item) => item.startsWith(`${encodedName}=`));
+  if (!entry) return null;
+  try {
+    return decodeURIComponent(entry.slice(encodedName.length + 1));
+  } catch {
+    return null;
+  }
+}
+
+function setCookie(name, value) {
+  const encodedName = encodeURIComponent(name);
+  const encodedValue = encodeURIComponent(value);
+  document.cookie = `${encodedName}=${encodedValue}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+  return getCookie(name) === value;
+}
+
+function removeCookie(name) {
+  document.cookie = `${encodeURIComponent(name)}=; max-age=0; path=/; SameSite=Lax`;
+}
+
 function saveDraft() {
   try {
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ version: 1, periods: readPeriods() }));
+    if (!setCookie(DRAFT_COOKIE_NAME, JSON.stringify({ version: 1, periods: readPeriods() }))) throw new Error("Cookie was not saved");
     showDraftStatus("Draft saved on this device.");
   } catch {
     showDraftStatus("Draft could not be saved in this browser.", true);
@@ -61,11 +84,11 @@ function saveDraft() {
 
 function loadDraft() {
   try {
-    const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const saved = getCookie(DRAFT_COOKIE_NAME);
     if (!saved) return null;
     const draft = JSON.parse(saved);
     if (!isValidDraft(draft)) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      removeCookie(DRAFT_COOKIE_NAME);
       return null;
     }
     return draft.periods;
@@ -76,8 +99,8 @@ function loadDraft() {
 
 function clearDraft() {
   try {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
-    return true;
+    removeCookie(DRAFT_COOKIE_NAME);
+    return getCookie(DRAFT_COOKIE_NAME) === null;
   } catch {
     return false;
   }
@@ -85,7 +108,7 @@ function clearDraft() {
 
 function loadTemplates() {
   try {
-    const saved = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+    const saved = getCookie(TEMPLATES_COOKIE_NAME);
     if (!saved) return [];
     const templates = JSON.parse(saved);
     if (!Array.isArray(templates)) return [];
@@ -102,8 +125,7 @@ function loadTemplates() {
 
 function saveTemplates(templates) {
   try {
-    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
-    return true;
+    return setCookie(TEMPLATES_COOKIE_NAME, JSON.stringify(templates.slice(0, 8)));
   } catch {
     return false;
   }
