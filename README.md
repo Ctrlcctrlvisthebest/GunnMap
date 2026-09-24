@@ -118,11 +118,11 @@ the sample schedule; period 7 stays blank because its Bow Gym room is unspecifie
 Room suggestions include second-floor N rooms. The two `K6` areas use their
 separate choices `K6 (R069)` and `K6 (R070)`. If a room appears more than once,
 the selected periods share the room area in equal color sections. The page
-automatically saves the current seven-period draft in the browser and restores
-it when reopened. Use **Clear Schedule** to remove the saved draft; the saved
-draft stays on the current device. **Share Link** puts the schedule in the URL
-fragment so it can be opened without server-side storage, while **Save Current**
-stores multiple named templates in the browser.
+automatically saves the current seven-period draft in a browser cookie and
+restores it when reopened. Use **Clear Schedule** to remove the saved cookie;
+the draft stays on the current device. **Share Link** puts the schedule in the
+URL fragment so it can be opened without server-side storage, while **Save
+Current** stores multiple named templates in browser cookies.
 The existing **Generate Map** action still sends the current form to the local
 `/api/render` endpoint to produce the preview. The generated PNG includes a
 period legend in the open lower-left area of the map.
