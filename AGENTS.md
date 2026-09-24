@@ -2,23 +2,28 @@
 
 ## Project layout
 
-- `map_highlighter.py` is the core Pillow renderer for building and room polygons.
-- `web_app.py` serves the local seven-period editor in `web/` and writes its rendered map to `output/period_map.png`.
-- `schedule_preview.py` renders the example route and legend.
-- `build_n_map.py` rebuilds `src/map/gunn_site_map.png` from the clean page-one PNG and the N-building reference image.
-- `room_regions.json` contains selectable room polygons; `room_index.csv` is the human-readable index. `building_regions.json` contains the older building-level polygons.
-- `src/map/` contains source and working map assets. `output/` contains generated previews; only `output/demo_*.png` is tracked.
+- `map_highlighter.ts` is the Sharp renderer for building and room polygons, including color strips for repeated rooms.
+- `web_app.ts` serves the seven-period editor and evacuation page in `web/`, attaches assembly information, and writes unique per-render PNGs plus `output/period_map.png`.
+- `evacuation.ts` and `evacuation_data.json` map explicit source-image groups to rooms. Unlisted rooms remain unconfirmed.
+- `project.ts` loads the inventory and resolves room IDs and aliases.
+- `schedule_preview.ts` renders the example schedule; `build_n_map.ts` rebuilds the working map from the clean page-one PNG and second-floor reference.
+- `room_regions.json` contains selectable room polygons; `room_index.csv` is the human-readable index. `building_regions.json` contains building-level polygons.
+- `src/map/` contains source and working map assets. Only `output/demo_*.png` previews are tracked.
 
 ## Working conventions
 
-- Work from the repository root. Follow `README.md` for setup and usage; the only Python dependency is in `requirements.txt`.
-- Preserve existing room IDs when editing `room_regions.json`. Keep `room_index.csv` aligned with any added, removed, or renamed rooms. The two `K6` rooms have distinct IDs, so do not merge them by label.
-- Polygon coordinates are based on the 2448 × 1584 map recorded in the JSON files. Check changes against the map images, especially for the N-building second floor. Do not overwrite the source PDF or clean page-one PNG when rebuilding the working map.
-- Keep the current room-selection scope documented in `README.md`: V rooms and most athletic spaces are excluded; the supported Bow Gym rooms are BG111, BG138, and BG117.
-- Put temporary renders in `output/` or a temporary directory. Avoid committing generated previews unless they are intentionally named `demo_*.png` and meant for the README.
+- Use Node.js 22 or newer and TypeScript for server and rendering code. Install dependencies with `npm ci`; do not reintroduce a Python runtime.
+- Preserve room IDs. Keep `room_index.csv` aligned with inventory changes. The two K6 rooms have distinct IDs and positions.
+- Polygon coordinates refer to the 2448 × 1584 map. Keep PNG legends within those dimensions so interactive room targets remain aligned.
+- Do not overwrite the source PDF or clean page-one PNG when rebuilding the working map.
+- Retain the documented selection scope: V rooms and most athletic spaces are excluded; selectable Bow Gym rooms are BG111, BG138, and BG117.
+- Schedule drafts and templates use cookies. Every schedule edit or load must invalidate outdated clickable targets, and stale async results must not restore them.
+- Each rendered image has its own URL. Never replace a previous tab's image with another tab's generated map.
+- Keep evacuation assignments grounded in the supplied reference image. Do not infer destinations for unlisted rooms; N214 belongs to the football-field section N201–N217.
+- Put temporary renders in `output/` or a temporary directory; do not commit them unless deliberately named `demo_*.png` for documentation.
 
 ## Verification
 
-- For Python changes, run `python3 -m compileall -q map_highlighter.py web_app.py schedule_preview.py build_n_map.py n_floor_validation.py`.
-- For polygon or rendering changes, render a representative room map with `python3 map_highlighter.py --rooms output/check.png 'A134=#ff595e' 'N211=#1982c4'` and inspect the result. Install `requirements.txt` first if Pillow is unavailable.
-- For web changes, run `python3 web_app.py --port 8000` and check the room list and map generation in the local page. There is no automated test suite yet.
+- Run `npm run typecheck`, `npm test`, and `npm run build`.
+- For rendering changes, generate a representative map including a repeated room and N214, and inspect the PNG and legend.
+- For interface changes, run `npm run dev -- --port 8000` and check draft restoration, templates, sharing, generation, download, classroom evacuation details, and invalidation after edits.

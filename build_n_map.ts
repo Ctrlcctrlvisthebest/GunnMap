@@ -14,5 +14,5 @@ const source=resolve(folder,'gunn_site_map_page1.png');
 const {width,height}=await sharp(source).metadata();
 console.log(await saveImage(sharp(source).composite([
   {input:ink,left:Math.round(1500*1.22645-622.744),top:Math.round(420*1.22670-320.161)},
-  {input:svg(width!,height!,'<path d="M1387 285 L1531 232" fill="none" stroke="black" stroke-width="2" stroke-dasharray="8 8"/>')}
+  {input:svg(width!,height!,'<path d="M1387 285 L1531 232" fill="none" stroke="black" stroke-width="2" stroke-dasharray="8 8"/><rect x="1514" y="391" width="67" height="22" fill="white" stroke="black" stroke-width="1"/><text x="1547.5" y="407" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="bold" fill="black">N-BLDG</text>')}
 ]).removeAlpha(),process.argv[2]??resolve(folder,'gunn_site_map.png')));

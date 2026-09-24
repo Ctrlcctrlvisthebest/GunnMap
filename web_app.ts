@@ -3,14 +3,33 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
 import { evacuationForRoom } from './evacuation.js';
-import { renderRooms } from './map_highlighter.js';
+import { renderRooms, svg, xml } from './map_highlighter.js';
 export { resolveRoom } from './project.js';
 class InputError extends Error {}
+interface LegendItem { period: number; label: string; floor: number; color: string }
+async function addScheduleLegend(image: Buffer, selected: LegendItem[]): Promise<Buffer> {
+  if (!selected.length) return image;
+  const { width, height } = await sharp(image).metadata();
+  if (!width || !height) throw new Error('Map dimensions are missing');
+  // Keep the original canvas size so room polygons and clickable markers stay aligned.
+  const padding = 24, headerHeight = 42, rowHeight = 34, legendWidth = 420;
+  const legendHeight = padding * 2 + headerHeight + rowHeight * selected.length;
+  const left = Math.max(padding, Math.min(420, width - legendWidth - padding));
+  const top = height - legendHeight - padding;
+  const rows = selected.map((item, index) => {
+    const y = top + padding + headerHeight + index * rowHeight;
+    const label = `Period ${item.period} · ${item.label}${item.floor === 2 ? ' (2F)' : ''}`;
+    return `<rect x="${left + padding}" y="${y + 4}" width="22" height="22" fill="${xml(item.color)}"/><text x="${left + padding + 34}" y="${y + 22}" font-size="22" fill="#344054">${xml(label)}</text>`;
+  }).join('');
+  const body = `<g font-family="sans-serif"><rect x="${left}" y="${top}" width="${legendWidth}" height="${legendHeight}" fill="white" stroke="#d0d5dd" stroke-width="2"/><text x="${left + padding}" y="${top + padding + 26}" font-size="26" fill="#182334">Schedule Legend</text>${rows}</g>`;
+  return sharp(image).composite([{ input: svg(width, height, body) }]).removeAlpha().png().toBuffer();
+}
 export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'output')) {
   if (!Array.isArray(periods) || periods.length !== 7) throw new InputError('Please submit all seven period slots');
-  const colors: Record<string,string> = {}, seen = new Map<string,number>();
+  const colors: Record<string,string[]> = {};
   const selected = [], warnings: string[] = [];
   for (const [i,p] of periods.entries()) {
     const index=i+1;
@@ -21,12 +40,15 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
     if (!/^#[0-9a-f]{6}$/i.test(color)) throw new InputError(`Period ${index}: invalid color`);
     let room;
     try {room=resolveRoom(building,roomName);} catch(error) {throw new InputError(`Period ${index}: ${(error as Error).message}`);}
-    if (seen.has(room.id)) warnings.push(`Periods ${seen.get(room.id)} and ${index} both use ${room.label}; the map uses Period ${index}'s color.`);
-    seen.set(room.id,index); colors[room.id]=color;
+    (colors[room.id] ??= []).push(color);
     selected.push({period:index,id:room.id,label:room.label,building,floor:room.floor??1,color,polygon:room.polygon,
       evacuation:evacuationForRoom(room),marker:[(room.label_box[0]+room.label_box[2])/2,(room.label_box[1]+room.label_box[3])/2]});
   }
-  const bytes=await renderRooms(colors,{opacity:0.55});
+  for (const id of Object.keys(colors)) {
+    const shared = selected.filter(item => item.id === id);
+    if (shared.length > 1) warnings.push(`Periods ${shared.map(item => item.period).join(', ')} share ${shared[0].label}; its map highlight is split into each period's color.`);
+  }
+  const bytes=await addScheduleLegend(await renderRooms(colors,{opacity:0.55}),selected);
   await mkdir(outputDir,{recursive:true});
   const id=randomUUID().replaceAll('-',''), filename=`period_map_${id}.png`, latest=resolve(outputDir,`.latest_map_${id}.png`);
   await writeFile(resolve(outputDir,filename),bytes,{flag:'wx'});

@@ -20,18 +20,48 @@ async function render(polygons: {polygon:Point[];color:string}[], size:Point, ba
   const body = polygons.map(({polygon,color})=>`<polygon points="${polygon.map(([x,y])=>`${Math.round(x*sx)},${Math.round(y*sy)}`).join(' ')}" fill="${xml(color)}" fill-opacity="${opacity}" stroke="${xml(color)}" stroke-opacity="${Math.min(1,opacity+95/255)}" stroke-width="${Math.max(2,Math.round(Math.min(sx,sy)*3))}" stroke-linejoin="round"/>`).join('');
   return sharp(source).composite([{input:svg(width,height,body)}]).removeAlpha().png().toBuffer();
 }
-export async function renderRooms(colors: Record<string,string>, options: HighlightOptions = {}): Promise<Buffer> {
-  const polygons = Object.entries(colors).map(([name,color])=>{
+function clipPolygon(polygon: Point[], axis: 0 | 1, boundary: number, keepGreater: boolean): Point[] {
+  if (!polygon.length) return [];
+  const result: Point[] = [];
+  const inside = (point: Point) => keepGreater ? point[axis] >= boundary : point[axis] <= boundary;
+  let previous = polygon[polygon.length - 1];
+  for (const current of polygon) {
+    if (inside(previous) !== inside(current)) {
+      const ratio = (boundary - previous[axis]) / (current[axis] - previous[axis]);
+      result.push([previous[0] + ratio * (current[0] - previous[0]), previous[1] + ratio * (current[1] - previous[1])]);
+    }
+    if (inside(current)) result.push(current);
+    previous = current;
+  }
+  return result;
+}
+function coloredStrips(polygon: Point[], colors: readonly string[]): { polygon: Point[]; color: string }[] {
+  if (colors.length === 1) return [{ polygon, color: colors[0] }];
+  const xs = polygon.map(point => point[0]), ys = polygon.map(point => point[1]);
+  const axis = Math.max(...xs) - Math.min(...xs) >= Math.max(...ys) - Math.min(...ys) ? 0 : 1;
+  const coordinates = axis === 0 ? xs : ys;
+  const lower = Math.min(...coordinates), upper = Math.max(...coordinates);
+  return colors.flatMap((color, index) => {
+    const start = lower + (upper - lower) * index / colors.length;
+    const end = lower + (upper - lower) * (index + 1) / colors.length;
+    const strip = clipPolygon(clipPolygon(polygon, axis, start, true), axis, end, false);
+    return strip.length >= 3 ? [{ polygon: strip, color }] : [];
+  });
+}
+export async function renderRooms(colors: Record<string,string | readonly string[]>, options: HighlightOptions = {}): Promise<Buffer> {
+  const polygons = Object.entries(colors).flatMap(([name,color])=>{
     const key=name.trim().toLowerCase();
     const byId=rooms.find(r=>r.id.toLowerCase()===key);
     const matches=byId?[byId]:rooms.filter(r=>[r.label,...(r.aliases??[])].some(label=>label.toLowerCase()===key));
     if (!matches.length) throw new Error(`Unknown room '${name}'; see room_index.csv`);
     if (matches.length>1) throw new Error(`Room label '${name}' is duplicated; select one of ${matches.map(r=>r.id).join(', ')}`);
-    return {polygon:matches[0].polygon,color};
+    const palette = typeof color === 'string' ? [color] : color;
+    if (!palette.length) throw new Error(`Room '${name}' needs at least one color`);
+    return coloredStrips(matches[0].polygon, palette);
   });
   return render(polygons,roomData.image_size,roomData.base_image,options);
 }
-export async function highlightRooms(colors:Record<string,string>, output:string, options:HighlightOptions = {}) {
+export async function highlightRooms(colors:Record<string,string | readonly string[]>, output:string, options:HighlightOptions = {}) {
   return saveImage(sharp(await renderRooms(colors,options)),output);
 }
 export async function highlightBuildings(colors:Record<string,string>, output:string, options:HighlightOptions = {}) {

@@ -27,6 +27,6 @@ export function resolveRoom(building: string, value: string): Room {
   }
   const matches = inventory.filter(room => [room.label, ...(room.aliases ?? [])].some(label => normalize(label) === normalize(value)));
   if (!matches.length) throw new Error(`Room '${value}' was not found in ${building} Building`);
-  if (matches.length > 1) throw new Error(`${value} appears twice on the map. Choose ${matches.map(room => `${room.label} (${room.id})`).join('、')}`);
+  if (matches.length > 1) throw new Error(`${value} appears twice on the map. Choose ${matches.map(room => `${room.label} (${room.id})`).join(', ')}`);
   return matches[0];
 }
