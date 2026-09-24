@@ -853,7 +853,6 @@
         ]
       ],
       "aliases": [
-        "图书馆",
         "library"
       ]
     },
@@ -3892,9 +3891,8 @@
           923
         ]
       ],
-      "purpose": "男生 / boys",
+      "purpose": "boys",
       "aliases": [
-        "男生",
         "boys"
       ]
     },
@@ -3926,9 +3924,8 @@
           923
         ]
       ],
-      "purpose": "瑜伽 / yoga",
+      "purpose": "yoga",
       "aliases": [
-        "瑜伽",
         "yoga"
       ]
     },
@@ -3960,13 +3957,11 @@
           1139
         ]
       ],
-      "purpose": "女生 / gender neutral",
+      "purpose": "gender neutral",
       "aliases": [
-        "女生",
         "girls",
         "gender neutral",
-        "gender-neutral",
-        "女生/gender neutral"
+        "gender-neutral"
       ]
     },
     {
