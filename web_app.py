@@ -8,9 +8,12 @@ import re
 import time
 import uuid
 from collections import defaultdict
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from map_highlighter import highlight_rooms
 
@@ -56,13 +59,44 @@ def _resolve_room(building: str, value: str) -> dict:
     return matches[0]
 
 
+def _add_schedule_legend(image_path: Path, selected: list[dict]) -> None:
+    if not selected:
+        return
+    with Image.open(image_path) as source:
+        map_image = source.convert("RGB")
+    padding = 24
+    header_height = 42
+    row_height = 34
+    legend_width = 420
+    legend_height = padding * 2 + header_height + row_height * len(selected)
+    legend_left = max(padding, min(420, map_image.width - legend_width - padding))
+    legend_top = map_image.height - legend_height - padding
+    canvas = map_image.copy()
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default(size=26)
+    row_font = ImageFont.load_default(size=22)
+    draw.rectangle(
+        (legend_left, legend_top, legend_left + legend_width, legend_top + legend_height),
+        fill="white",
+        outline="#d0d5dd",
+        width=2,
+    )
+    draw.text((legend_left + padding, legend_top + padding), "Schedule Legend", fill="#182334", font=font)
+    for index, item in enumerate(selected):
+        y = legend_top + padding + header_height + index * row_height
+        draw.rectangle((legend_left + padding, y + 4, legend_left + padding + 22, y + 26), fill=ImageColor.getcolor(item["color"], "RGB"))
+        label = f"Period {item['period']} · {item['label']}"
+        if item.get("floor") == 2:
+            label += " (2F)"
+        draw.text((legend_left + padding + 34, y), label, fill="#344054", font=row_font)
+    canvas.save(image_path, format="PNG")
+
+
 def _render_periods(periods: object) -> dict:
     if not isinstance(periods, list) or len(periods) != 7:
         raise ValueError("Please submit all seven period slots")
-    colors = {}
+    colors = defaultdict(list)
     selected = []
-    warnings = []
-    seen = {}
     for index, period in enumerate(periods, 1):
         if not isinstance(period, dict):
             raise ValueError(f"Period {index} has invalid data")
@@ -79,20 +113,18 @@ def _render_periods(periods: object) -> dict:
             room = _resolve_room(building, room_name)
         except ValueError as exc:
             raise ValueError(f"Period {index}: {exc}") from exc
-        if room["id"] in seen:
-            warnings.append(f"Periods {seen[room['id']]} and {index} both use {room['label']}; the map uses Period {index}'s color.")
-        seen[room["id"]] = index
-        colors[room["id"]] = color
+        colors[room["id"]].append(color)
         selected.append({"period": index, "id": room["id"], "label": room["label"], "building": building, "floor": room.get("floor", 1), "color": color})
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     temp = OUTPUT.parent / f".period_map_{uuid.uuid4().hex}.png"
     try:
         highlight_rooms(colors, temp, opacity=0.55)
+        _add_schedule_legend(temp, selected)
         os.replace(temp, OUTPUT)
     finally:
         temp.unlink(missing_ok=True)
-    return {"image_url": f"/output/period_map.png?v={time.time_ns()}", "selected": selected, "warnings": warnings}
+    return {"image_url": f"/output/period_map.png?v={time.time_ns()}", "selected": selected, "warnings": []}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -118,6 +150,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(WEB / "app.js", "text/javascript; charset=utf-8")
         if path == "/style.css":
             return self._file(WEB / "style.css", "text/css; charset=utf-8")
+        if path.startswith("/__source/"):
+            source_name = path.removeprefix("/__source/")
+            source_path = {
+                "app.js": WEB / "app.js",
+                "style.css": WEB / "style.css",
+                "web_app.py": ROOT / "web_app.py",
+                "README.md": ROOT / "README.md",
+            }.get(source_name)
+            if source_path is None or not source_path.is_file():
+                self.send_error(404)
+                return
+            body = f'<textarea id="source">{escape(source_path.read_text(encoding="utf-8"))}</textarea>'.encode("utf-8")
+            return self._send(200, body, "text/html; charset=utf-8")
         if path == "/map.png":
             return self._file(MAP, "image/png")
         if path == "/output/period_map.png":

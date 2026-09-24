@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
@@ -101,8 +101,57 @@ def highlight_buildings(
     return _save_polygons(image_path, data["image_size"], colored_polygons, output_path, opacity)
 
 
+def _clip_polygon(polygon: list[list[int]], axis: int, boundary: float, keep_greater: bool) -> list[list[float]]:
+    """Clip a polygon to one side of a horizontal or vertical boundary."""
+    if not polygon:
+        return []
+    clipped = []
+    previous = polygon[-1]
+
+    def inside(point: list[int]) -> bool:
+        return point[axis] >= boundary if keep_greater else point[axis] <= boundary
+
+    for current in polygon:
+        previous_inside = inside(previous)
+        current_inside = inside(current)
+        if previous_inside != current_inside:
+            distance = current[axis] - previous[axis]
+            ratio = (boundary - previous[axis]) / distance
+            clipped.append([
+                previous[0] + ratio * (current[0] - previous[0]),
+                previous[1] + ratio * (current[1] - previous[1]),
+            ])
+        if current_inside:
+            clipped.append([current[0], current[1]])
+        previous = current
+    return clipped
+
+
+def _split_polygon(polygon: list[list[int]], parts: int) -> list[list[list[float]]]:
+    """Split a room polygon into equal-width strips for multiple period colors."""
+    if parts <= 1:
+        return [polygon]
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    axis = 0 if max(xs) - min(xs) >= max(ys) - min(ys) else 1
+    lower = min(xs) if axis == 0 else min(ys)
+    upper = max(xs) if axis == 0 else max(ys)
+    if lower == upper:
+        return [polygon]
+
+    strips = []
+    for index in range(parts):
+        start = lower + (upper - lower) * index / parts
+        end = lower + (upper - lower) * (index + 1) / parts
+        strip = _clip_polygon(polygon, axis, start, True)
+        strip = _clip_polygon(strip, axis, end, False)
+        if len(strip) >= 3:
+            strips.append(strip)
+    return strips
+
+
 def highlight_rooms(
-    room_colors: Mapping[str, str],
+    room_colors: Mapping[str, str | Sequence[str]],
     output_path: str | Path,
     *,
     base_image: str | Path | None = None,
@@ -112,6 +161,8 @@ def highlight_rooms(
     """Highlight individual labeled rooms by map label or unique R-number.
 
     Example: highlight_rooms({"A134": "red", "R026": "#ffca3a"}, "rooms.png")
+    A room may also receive a list of colors; its polygon is split into equal
+    strips so multiple periods can share the same room without overwriting it.
     The duplicated K6 label must be selected by its unique R-number.
     """
     rooms_file = Path(rooms_path)
@@ -134,11 +185,14 @@ def highlight_rooms(
         if len(matches) > 1:
             ids = ", ".join(room["id"] for room in matches)
             raise ValueError(f"Room label {name!r} is duplicated; select one of {ids}")
+        colors = list(color) if isinstance(color, Sequence) and not isinstance(color, str) else [color]
         try:
-            rgb = ImageColor.getcolor(color, "RGB")
+            rgbs = [ImageColor.getcolor(value, "RGB") for value in colors]
         except (ValueError, TypeError) as exc:
             raise ValueError(f"Invalid color for {name!r}: {color!r}") from exc
-        colored_polygons.append((matches[0]["polygon"], rgb))
+        polygons = _split_polygon(matches[0]["polygon"], len(rgbs))
+        for polygon, rgb in zip(polygons, rgbs):
+            colored_polygons.append((polygon, rgb))
 
     return _save_polygons(image_path, data["image_size"], colored_polygons, output_path, opacity)
 
