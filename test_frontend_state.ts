@@ -98,6 +98,91 @@ class TestDocument extends Element {
   createElementNS() { return new Element(); }
 }
 
+function mountPeriodEditor(target: Element, initial: Period[], rooms: typeof inventory, _buildings: string[], onChange: (periods: Period[]) => void) {
+  let periods = initial.map(period => ({ ...period }));
+  const autoBuildings = periods.map(period => {
+    const matches = rooms.filter(item => [item.id, item.label, `${item.label} (${item.id})`, ...(item.aliases ?? [])]
+      .some(candidate => candidate.toUpperCase() === period.room.trim().toUpperCase()));
+    const candidates = [...new Set(matches.map(item => item.building))];
+    return candidates.length === 1 && candidates[0] === period.building ? period.building : "";
+  });
+  const cards: (Element & { update(): void })[] = Array.from({ length: 7 }, (_, index) => {
+    const card = new Element() as Element & { update(): void };
+    card.className = "period-card";
+    card.dataset.period = String(index + 1);
+    const room = card.querySelector('input[type="text"]');
+    const building = card.querySelector("select");
+    const color = card.querySelector('input[type="color"]');
+    const dataList = card.querySelector("datalist");
+    const matches = (value: string) => rooms.filter(item =>
+      [item.id, item.label, `${item.label} (${item.id})`, ...(item.aliases ?? [])]
+        .some(candidate => candidate.toUpperCase() === value.trim().toUpperCase()));
+    const update = () => {
+      const period = periods[index];
+      room.value = period.room;
+      building.value = period.building;
+      color.value = period.color;
+      card.style.setProperty("--period-accent", period.color);
+      const candidates = rooms.filter(item => !period.building || item.building === period.building);
+      dataList.replaceChildren(...candidates.map(item => {
+        const option = new Element();
+        const duplicates = candidates.filter(candidate => candidate.label === item.label).length > 1;
+        option.value = duplicates ? item.aliases?.[0] ?? item.label : item.label;
+        option.textContent = `${item.building}${item.floor === 2 ? " · 2nd floor" : ""}`;
+        return option;
+      }));
+    };
+    const publish = (next: Period[]) => {
+      periods = next;
+      for (let cardIndex = 0; cardIndex < cards.length; cardIndex += 1) cards[cardIndex].update();
+      onChange(next.map(period => ({ ...period })));
+    };
+    const editRoom = () => {
+      const next = periods.map(period => ({ ...period }));
+      next[index].room = room.value;
+      const buildings = [...new Set(matches(room.value).map(item => item.building))];
+      if (buildings.length === 1) {
+        next[index].building = buildings[0];
+        autoBuildings[index] = buildings[0];
+      } else if (autoBuildings[index] && next[index].building === autoBuildings[index]) {
+        next[index].building = "";
+        autoBuildings[index] = "";
+      }
+      publish(next);
+    };
+    room.addEventListener("input", editRoom);
+    room.addEventListener("change", editRoom);
+    building.addEventListener("change", () => {
+      const next = periods.map(period => ({ ...period }));
+      next[index].building = building.value;
+      next[index].room = "";
+      autoBuildings[index] = "";
+      publish(next);
+    });
+    color.addEventListener("input", () => {
+      const next = periods.map(period => ({ ...period }));
+      next[index].color = color.value;
+      publish(next);
+    });
+    card.update = update;
+    return card;
+  });
+  target.replaceChildren(...cards);
+  for (const card of cards) card.update();
+  return {
+    setPeriods(next: Period[]) {
+      periods = next.map(period => ({ ...period }));
+      periods.forEach((period, index) => {
+        const matches = rooms.filter(item => [item.id, item.label, `${item.label} (${item.id})`, ...(item.aliases ?? [])]
+          .some(candidate => candidate.toUpperCase() === period.room.trim().toUpperCase()));
+        const candidates = [...new Set(matches.map(item => item.building))];
+        autoBuildings[index] = candidates.length === 1 && candidates[0] === period.building ? period.building : "";
+      });
+      for (const card of cards) card.update();
+    },
+  };
+}
+
 const frontendCode = transpileModule(readFileSync(join(ROOT, "web/app.ts"), "utf8"), {
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
   fileName: "web/app.ts",
@@ -148,15 +233,23 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
   const get = (selector: string) => document.querySelector(selector);
   get("#map-image").src = "/map.png";
   get("#download-link").classList.add("is-disabled");
+  let timerId = 0;
+  const timers = new Map<number, () => void>();
   const io: { render: (options: RenderRequest) => Promise<TestResponse>; decode: () => Promise<void>; clipboard: string } = { render: async () => response(resultFor("M3")), decode: async () => {}, clipboard: "" };
   const window = {
     matchMedia: () => ({ matches: false }),
     location: new URL(`http://localhost:8765/${hash}`),
     history: { replaceState(_state: unknown, _title: string, url: string | URL) { window.location = new URL(url, window.location); } },
+    setTimeout(callback: () => void) { timerId += 1; timers.set(timerId, callback); return timerId; },
+    clearTimeout(id: number) { timers.delete(id); },
     open() {},
   };
   vm.runInNewContext(frontendCode, {
     exports: {},
+    require: (name: string) => {
+      assert.equal(name, "./period-editor.js");
+      return { mountPeriodEditor };
+    },
     document, URLSearchParams, requestAnimationFrame: () => 1,
     ResizeObserver: class { observe() {} },
     Image: class { decode() { return io.decode(); } },
@@ -176,6 +269,8 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
     card.querySelector("select").value = label[0].toUpperCase();
     card.querySelector('input[type="text"]').value = label;
     card.querySelector('input[type="color"]').value = color;
+    void card.querySelector('input[type="text"]').trigger("input");
+    void card.querySelector('input[type="color"]').trigger("input");
   };
   const submit = () => get("#period-form").trigger("submit");
   const assertCleared = () => {
@@ -186,12 +281,14 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
     assert.equal(get("#download-link").getAttribute("aria-disabled"), "true");
     assert.equal(get("#room-click-help").hidden, true);
     assert.equal(get("#room-evacuation").open, false);
+    assert.equal(get("#map-preview-dialog").open, false);
   };
   if (renderOnStart) {
     setRoom("M3");
     await submit();
     assert.equal(get("#room-markers").children.length, 1);
     assert.equal(get("#map-image").src, "/output/M3.png");
+    assert.equal(get("#map-preview-dialog").open, true);
   }
   function readCookie(name: typeof draftCookie): Draft | null;
   function readCookie(name: typeof templateCookie): Template[] | null;
@@ -241,6 +338,15 @@ test("room entry infers buildings from inventory without altering entered text",
   assert.equal(select.value, "N", "manual selection remains available for numeric rooms");
 });
 
+test("duplicate K6 room suggestions use map locations rather than internal IDs", async () => {
+  const h = await harness({ renderOnStart: false });
+  const options = h.get("#period-list").children[0].querySelector("datalist").children;
+  const labels = options.map(option => option.value);
+  assert.ok(labels.includes("K6 (upper map location)"));
+  assert.ok(labels.includes("K6 (lower map location)"));
+  assert.equal(labels.some(label => /R\d{3}/.test(label)), false);
+});
+
 test("restored room-only drafts infer a building and clear it when the room becomes invalid", async () => {
   const periods = blankPeriods();
   periods[0].room = "n214";
@@ -274,7 +380,7 @@ test("loading the example clears the previous clickable map", async () => {
   const h = await harness();
   await h.get("#sample-button").trigger("click");
   h.assertCleared();
-  assert.match(h.get("#status").textContent, /Example loaded/);
+  assert.match(h.get("#toast-region").textContent, /Example loaded/);
 });
 
 test("failed regeneration never leaves old room targets or downloads", async () => {
@@ -488,6 +594,8 @@ test("template dialogs allow cancellation and require an explicit delete confirm
   h.get("#template-name").value = "Monday";
   await h.get("#template-form").trigger("submit");
   assert.equal(h.get("#template-dialog").open, false);
+  assert.equal(h.get("#toast-region").textContent, "Monday saved.");
+  assert.equal(h.get("#toast-region").classList.contains("is-visible"), true);
   await h.get("#delete-template-button").trigger("click");
   await h.get("#cancel-delete-template-button").trigger("click");
   assert.equal(h.get("#delete-template-dialog").open, false);

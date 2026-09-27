@@ -1,39 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="wa-theme-shoelace wa-palette-shoelace wa-dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#19191c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="GunnMap" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <title>Gunn Seven-Period Map</title>
+    <link rel="stylesheet" href="/ui.css" />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to content</a>
     <aside class="site-sidebar" aria-label="GunnMap navigation">
       <a class="brand" href="/" aria-label="GunnMap home">
         <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></svg></span>
         <span class="brand-name">Gunn<span>Map</span></span>
       </a>
-      <p class="brand-caption">A little direction for your day.</p>
-      <div class="nav-label">EXPLORE CAMPUS</div>
+      <div class="nav-label">CAMPUS MAPS</div>
       <nav class="site-nav" aria-label="Campus maps">
         <a href="/" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></svg><span>Schedule Map</span></a>
         <a href="/evacuation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M8 5h8a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h8"/></svg><span>Evacuation Routes</span></a>
       </nav>
-      <div class="sidebar-note"><span class="campus-dot" aria-hidden="true"></span>Made for Gunn students<p>Your campus. Your way.</p></div>
     </aside>
     <div class="app-content">
-    <header class="page-intro">
-      <svg class="hero-waves" viewBox="0 0 1400 260" preserveAspectRatio="none" aria-hidden="true"><path fill="#ffffff09" d="M0 80C300 210 550 30 800 100s350 90 600-20V0H0Z"/><path fill="#15151b24" d="M0 160c230 50 390-30 610-10s430 130 790-45v155H0Z"/><path fill="#232325" d="M0 230c310-65 450 60 710 0s420-5 690 0v30H0Z"/></svg>
-      <div class="intro-copy"><div class="eyebrow">GUNN HIGH SCHOOL <span aria-hidden="true">/</span> YOUR CAMPUS COMPANION</div>
-        <h1>Know your way.</h1>
-        <p>Your classes, your colors, your campus. All on one map.</p>
-      </div>
-      <div class="intro-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></svg><span>7 periods.<br><strong>One map.</strong></span></div>
-    </header>
-
-    <main id="main-content" class="layout">
+    <main id="main-content" class="layout" tabindex="-1">
       <section class="editor panel" aria-labelledby="editor-title">
         <div class="panel-heading">
           <div>
@@ -41,19 +36,24 @@
             <h2 id="editor-title">Your schedule</h2>
           </div>
           <div class="panel-actions">
-            <button id="sample-button" class="text-button" type="button">Load Example</button>
-            <button id="clear-button" class="text-button" type="button">Clear Schedule</button>
-            <button id="share-button" class="text-button" type="button">Share Link</button>
+            <details class="editor-more">
+              <summary>More</summary>
+              <div class="more-actions">
+                <button id="share-button" class="text-button" type="button">Share Link</button>
+                <details class="editor-options">
+                  <summary>Saved schedules</summary>
+                  <div class="template-controls">
+                    <label for="template-select">Choose a saved schedule</label>
+                    <wa-select id="template-select" aria-label="Saved schedules" placeholder="Choose a saved schedule" size="s"></wa-select>
+                    <button id="save-template-button" class="text-button" type="button">Save current</button>
+                    <button id="delete-template-button" class="text-button" type="button" disabled>Delete</button>
+                  </div>
+                </details>
+                <button id="sample-button" class="text-button" type="button">Load Example</button>
+                <button id="clear-button" class="text-button" type="button">Clear Schedule</button>
+              </div>
+            </details>
           </div>
-        </div>
-        <p class="editor-hint">Enter a room — we’ll find its building for you.</p>
-        <div class="template-controls">
-          <label for="template-select">Saved templates</label>
-          <select id="template-select" aria-label="Saved schedule templates">
-            <option value="">Choose a saved template</option>
-          </select>
-          <button id="save-template-button" class="text-button" type="button">Save Current</button>
-          <button id="delete-template-button" class="text-button" type="button" disabled>Delete</button>
         </div>
         <form id="period-form" novalidate>
           <div id="period-list" class="period-list"></div>
@@ -64,29 +64,31 @@
           </div>
         </form>
       </section>
+    </main>
 
-      <section class="preview panel" aria-labelledby="preview-title">
+    <dialog id="map-preview-dialog" class="preview map-preview-dialog panel" aria-labelledby="preview-title">
         <div class="panel-heading">
           <div>
             <div class="eyebrow">MAP PREVIEW</div>
             <h2 id="preview-title">Your campus map</h2>
           </div>
-          <a id="download-link" class="download-link is-disabled" href="#" download="gunn-period-map.png" aria-disabled="true">Download PNG</a>
+          <div class="preview-actions">
+            <a id="download-link" class="download-link is-disabled" href="#" download="gunn-period-map.png" aria-disabled="true">Download PNG</a>
+            <form method="dialog"><button class="dialog-close" aria-label="Close map preview" autofocus>×</button></form>
+          </div>
         </div>
         <div class="map-frame">
           <div class="interactive-map">
             <img id="map-image" src="/map.png" alt="Original Gunn campus map; selected rooms will appear highlighted after generation" />
             <svg id="room-hit-areas" class="room-hit-areas" aria-hidden="true"></svg>
             <div id="room-markers" class="room-markers"></div>
+            <div id="room-tooltips" class="room-tooltips"></div>
           </div>
         </div>
         <div class="map-key"><span><i class="key-dot" aria-hidden="true"></i> Your class locations</span><span>Click a room for evacuation info <span aria-hidden="true">↗</span></span></div>
-        <p id="room-click-help" class="map-help" hidden>Marker colors identify class periods; shared rooms show every period's color. Click a classroom marker or a room below for its fire assembly location. Click the map background to view the full-size PNG.</p>
-        <div id="legend" class="legend" aria-label="Highlighted rooms"></div>
-        <p id="warning" class="warning" role="status"></p>
-      </section>
-    </main>
+    </dialog>
     <footer class="site-footer"><span>GunnMap <span aria-hidden="true">·</span> Henry M. Gunn High School</span><span>Unofficial student resource</span></footer>
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
     </div>
 
     <dialog id="template-dialog" class="room-dialog template-dialog" aria-labelledby="template-dialog-title">
@@ -138,7 +140,7 @@
         <figcaption>Box marks your group's label on the supplied reference map.</figcaption>
       </figure>
       <p class="map-help">Follow current school staff instructions during an emergency.</p>
-      <a class="download-link assembly-full-map" href="/evacuation" target="_blank" rel="noopener">View full evacuation map ↗</a>
+      <a class="download-link assembly-full-map" href="/evacuation">View full evacuation map ↗</a>
     </dialog>
   </body>
 </html>
