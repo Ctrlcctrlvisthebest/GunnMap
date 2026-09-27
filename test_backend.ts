@@ -23,10 +23,10 @@ test('source range boundaries and unresolved rooms remain explicit',()=>{
  assert.equal(evacuationForRoom({label:'D-LIB',building:'D'}).group,'green');
  for(const room of rooms){const f=evacuationForRoom(room).focus;if(f){assert.ok(f.x>=0&&f.y>=0&&f.width>0&&f.height>0);assert.ok(f.x+f.width<=1&&f.y+f.height<=1);}}
 });
-test('duplicate K6 rooms require unique IDs',()=>{
- assert.throws(()=>resolveRoom('K','K6'),/twice/);
+test('duplicate K6 rooms use readable location aliases and keep legacy IDs',()=>{
+ assert.throws(()=>resolveRoom('K','K6'),/K6 \(upper map location\), K6 \(lower map location\)/);
  const matches=rooms.filter(r=>r.label==='K6');assert.equal(matches.length,2);
- for(const room of matches) {assert.equal(resolveRoom('K',`K6 (${room.id})`).id,room.id);assert.equal(evacuationForRoom(room).reference_label,'K6-K13');}
+ for(const room of matches) {assert.equal(resolveRoom('K',room.aliases![0]).id,room.id);assert.equal(resolveRoom('K',`K6 (${room.id})`).id,room.id);assert.equal(evacuationForRoom(room).reference_label,'K6-K13');}
  assert.throws(()=>resolveRoom('M','R148'),/not in/);
 });
 test('shared rooms render every period color in clipped horizontal and vertical strips',async()=>{
@@ -98,7 +98,8 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   for(const body of [null,[],{}, {periods:[]},{periods:[null,...Array(6).fill({})]}, {periods:periods('N','N214','red')}, {periods:periods('M','N214')}]) assert.equal((await post(body)).status,400);
   assert.equal((await fetch(base+'/api/render',{method:'POST',body:'{'})).status,400);
   assert.equal((await fetch(base+'/api/render',{method:'POST',body:'x'.repeat(16001)})).status,400);
-  for(const path of ['/','/app.js','/style.css','/evacuation','/evacuation.js','/evacuation-map.png','/map.png']) assert.equal((await fetch(base+path)).status,200,path);
+  for(const path of ['/','/app.js','/style.css','/evacuation','/evacuation.js','/evacuation-map.png','/map.png','/manifest.webmanifest','/icon.svg','/apple-touch-icon.png','/pwa-icon-192.png','/pwa-icon-512.png']) assert.equal((await fetch(base+path)).status,200,path);
+  const manifestResponse=await fetch(base+'/manifest.webmanifest');assert.match(manifestResponse.headers.get('content-type')??'',/^application\/manifest\+json/);assert.equal((await manifestResponse.json()).display,'standalone');
   for(const name of ['app','evacuation']) {
    const script=await fetch(`${base}/${name}.js`);
    assert.match(script.headers.get('content-type')??'',/^text\/javascript/);

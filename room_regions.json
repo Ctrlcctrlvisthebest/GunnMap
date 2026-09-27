@@ -2147,6 +2147,7 @@
       "id": "R069",
       "label": "K6",
       "building": "K",
+      "aliases": ["K6 (upper map location)"],
       "label_box": [
         668,
         425,
@@ -2176,6 +2177,7 @@
       "id": "R070",
       "label": "K6",
       "building": "K",
+      "aliases": ["K6 (lower map location)"],
       "label_box": [
         711,
         529,

@@ -1,10 +1,11 @@
-export {};
+import "./ui-components.js";
+import { mountPeriodEditor, type Period as EditorPeriod, type PeriodEditorHandle, type RoomOption } from "./period-editor.js";
 
 type Point = [number, number];
-interface Period { building: string; room: string; color: string }
+type Period = EditorPeriod;
+type Room = RoomOption;
 interface ScheduleDraft { version: 1; periods: Period[] }
 interface ScheduleTemplate { name: string; periods: Period[] }
-interface Room { id: string; label: string; building: string; floor?: number; aliases?: string[] }
 interface Evacuation {
   status: 'mapped' | 'unconfirmed'; group: string | null; color: string | null;
   destination: string; reference_label: string | null; note: string;
@@ -14,14 +15,13 @@ interface SelectedRoom extends Room {
   period: number; color: string; polygon: Point[]; marker: Point; evacuation: Evacuation;
 }
 interface RoomGroup extends SelectedRoom { periods: number[]; colors: string[] }
-interface RenderResult { image_url: string; selected: SelectedRoom[]; warnings: string[]; map_size: Point }
+interface RenderResult { image_url: string; selected: SelectedRoom[]; map_size: Point }
 interface ActiveRender { revision: number; promise: Promise<boolean> }
 interface MarkerEntry {
   marker: HTMLElement; room: RoomGroup; anchorX: number; anchorY: number;
   halfWidth: number; halfHeight: number;
 }
 interface Position { x: number; y: number }
-
 function query<T extends Element = HTMLElement>(selector: string, parent: ParentNode = document): T {
   const element = parent.querySelector<T>(selector);
   if (!element) throw new Error(`Missing page element: ${selector}`);
@@ -49,19 +49,22 @@ const renderButton = query<HTMLButtonElement>("#render-button");
 const sampleButton = query<HTMLButtonElement>("#sample-button");
 const clearButton = query<HTMLButtonElement>("#clear-button");
 const shareButton = query<HTMLButtonElement>("#share-button");
-const templateSelect = query<HTMLSelectElement>("#template-select");
+type WaSelect = HTMLElement & { value: string; disabled: boolean };
+const templateSelect = query<WaSelect>("#template-select");
 const saveTemplateButton = query<HTMLButtonElement>("#save-template-button");
 const deleteTemplateButton = query<HTMLButtonElement>("#delete-template-button");
 const templateDialog = query<HTMLDialogElement>("#template-dialog");
 const templateName = query<HTMLInputElement>("#template-name");
 const templateMessage = query("#template-message");
 const deleteTemplateDialog = query<HTMLDialogElement>("#delete-template-dialog");
+const mapPreviewDialog = query<HTMLDialogElement>("#map-preview-dialog");
+const toastRegion = query("#toast-region");
+const editorMore = query<HTMLDetailsElement>(".editor-more");
 const mapImage = query<HTMLImageElement>("#map-image");
 const downloadLink = query<HTMLAnchorElement>("#download-link");
-const legend = query("#legend");
-const warning = query("#warning");
 const draftStatus = query("#draft-status");
 const roomMarkers = query("#room-markers");
+const roomTooltips = query("#room-tooltips");
 const roomHitAreas = query("#room-hit-areas");
 const evacuationDialog = query<HTMLDialogElement>("#room-evacuation");
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -73,6 +76,8 @@ interactiveMap.insertBefore(roomLeaders, roomMarkers);
 
 let rooms: Room[] = [];
 let buildings: string[] = [];
+let periods: Period[] = PERIOD_COLORS.map((color) => ({ building: "", room: "", color }));
+let periodEditor: PeriodEditorHandle | null = null;
 let selectedRooms = new Map<string, RoomGroup>();
 let markerMapSize: Point = [1, 1];
 let markerLayoutFrame = 0;
@@ -81,6 +86,22 @@ let activeRender: ActiveRender | null = null;
 let pendingDownload = false;
 let roomsLoaded = false;
 let pendingTemplateDeletion = "";
+let toastTimer = 0;
+
+function showToast(message: string) {
+  toastRegion.textContent = message;
+  toastRegion.classList.add("is-visible");
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastRegion.classList.remove("is-visible");
+    toastRegion.textContent = "";
+    toastTimer = 0;
+  }, 3000);
+}
+
+function closeMoreMenu() {
+  editorMore.open = false;
+}
 
 function showDraftStatus(message: string, isError = false) {
   draftStatus.textContent = message;
@@ -185,24 +206,26 @@ function saveTemplates(templates: ScheduleTemplate[]) {
   }
 }
 
-function renderTemplateOptions(selectedName = templateSelect.value) {
-  templateSelect.replaceChildren(new Option("Choose a saved template", ""));
-  for (const template of loadTemplates()) {
-    templateSelect.append(new Option(template.name, template.name));
-  }
-  templateSelect.value = loadTemplates().some(template => template.name === selectedName) ? selectedName : "";
+function renderTemplateOptions(selectedName = decodeURIComponent(templateSelect.value || "")) {
+  const templates = loadTemplates();
+  templateSelect.replaceChildren(...templates.map((template) => {
+    const option = document.createElement("wa-option");
+    option.value = encodeURIComponent(template.name);
+    option.textContent = template.name;
+    return option;
+  }));
+  templateSelect.value = templates.some(template => template.name === selectedName) ? encodeURIComponent(selectedName) : "";
   deleteTemplateButton.disabled = !templateSelect.value;
 }
 function invalidatePreview(message = "Schedule changed. Generate Map to update room locations and evacuation details.") {
   scheduleRevision += 1;
   if (evacuationDialog.open) evacuationDialog.close();
+  if (mapPreviewDialog.open) mapPreviewDialog.close();
   selectedRooms.clear();
   roomMarkers.replaceChildren();
+  roomTooltips.replaceChildren();
   roomHitAreas.replaceChildren();
   roomLeaders.replaceChildren();
-  legend.replaceChildren();
-  updateDuplicateWarnings();
-  query("#room-click-help").hidden = true;
   if (mapImage.getAttribute("src") !== "/map.png") mapImage.src = "/map.png";
   mapImage.alt = "Original Gunn campus map; generate an updated map for this schedule";
   downloadLink.href = "#";
@@ -226,9 +249,6 @@ function scheduleEdited() {
   removeSharedSchedule();
   saveDraft();
 }
-
-form.addEventListener("input", scheduleEdited);
-form.addEventListener("change", scheduleEdited);
 
 function layoutRoomMarkers() {
   const width = interactiveMap.clientWidth;
@@ -359,6 +379,7 @@ function openEvacuation(room: RoomGroup | undefined) {
 
 function showRoomTargets(selected: SelectedRoom[], mapSize: Point) {
   roomMarkers.replaceChildren();
+  roomTooltips.replaceChildren();
   roomHitAreas.replaceChildren();
   roomLeaders.replaceChildren();
   markerMapSize = mapSize;
@@ -395,11 +416,18 @@ function showRoomTargets(selected: SelectedRoom[], mapSize: Point) {
     marker.append(markerLabel);
     marker.setAttribute("aria-label", `${room.label}, period${room.periods.length > 1 ? "s" : ""} ${room.periods.join(", ")}: fire evacuation details`);
     marker.setAttribute("aria-haspopup", "dialog");
-    marker.title = `${room.label} · Fire evacuation details`;
+    marker.id = `room-marker-${room.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    const tooltip = document.createElement("wa-tooltip");
+    tooltip.setAttribute("for", marker.id);
+    tooltip.setAttribute("placement", "top");
+    room.periods.forEach((period, index) => {
+      if (index) tooltip.append(document.createElement("br"));
+      tooltip.append(document.createTextNode(`P${period} · ${room.label}${room.floor === 2 ? " (2F)" : ""}`));
+    });
     marker.addEventListener("click", () => openEvacuation(room));
     roomMarkers.append(marker);
+    roomTooltips.append(tooltip);
   }
-  query("#room-click-help").hidden = selected.length === 0;
   layoutRoomMarkers();
 }
 
@@ -409,142 +437,21 @@ function buildingName(code: string) {
   return `${code} Building`;
 }
 
-function updateSuggestions(card: HTMLElement, clearRoom = true) {
-  const building = query<HTMLSelectElement>("select", card).value;
-  const input = query<HTMLInputElement>('input[type="text"]', card);
-  const dataList = query<HTMLDataListElement>("datalist", card);
-  if (clearRoom) input.value = "";
-  dataList.replaceChildren();
-  const candidates = rooms.filter((room) => !building || room.building === building);
-  const counts = new Map<string, number>();
-  for (const room of candidates) counts.set(room.label, (counts.get(room.label) || 0) + 1);
-  for (const room of candidates) {
-    const option = document.createElement("option");
-    option.value = (counts.get(room.label) ?? 0) > 1 ? `${room.label} (${room.id})` : room.label;
-    option.label = `${room.id}${room.floor === 2 ? " · 2F" : ""}`;
-    dataList.append(option);
-  }
-}
-
-function inferBuilding(card: HTMLElement) {
-  const select = query<HTMLSelectElement>("select", card);
-  const name = query<HTMLInputElement>('input[type="text"]', card).value.trim().toUpperCase();
-  const matches = rooms.filter((room) =>
-    [room.id, room.label, `${room.label} (${room.id})`]
-      .some((value) => value.toUpperCase() === name));
-  const candidates = [...new Set(matches.map((room) => room.building))];
-  if (candidates.length === 1) {
-    select.value = candidates[0];
-    card.dataset.autoBuilding = select.value;
-  } else if (card.dataset.autoBuilding) {
-    if (select.value === card.dataset.autoBuilding) select.value = "";
-    delete card.dataset.autoBuilding;
-  }
-  updateSuggestions(card, false);
-}
-
-function createPeriod(number: number) {
-  const card = document.createElement("div");
-  card.className = "period-card";
-  card.dataset.period = String(number);
-  card.style.setProperty("--period-accent", PERIOD_COLORS[number - 1]);
-  card.innerHTML = `
-    <div class="period-number"><span>PERIOD</span><strong>${number}</strong></div>
-    <label class="field field-room"><span>Room</span><input type="text" list="rooms-${number}" placeholder="e.g. N211" autocomplete="off" aria-label="Period ${number} room"><datalist id="rooms-${number}"></datalist></label>
-    <label class="field field-building"><span>Building</span><select aria-label="Period ${number} building"><option value="">Auto-detect</option></select></label>
-    <label class="field field-color"><span>Color</span><input type="color" value="${PERIOD_COLORS[number - 1]}" aria-label="Period ${number} color"></label>
-  `;
-  const select = query<HTMLSelectElement>("select", card);
-  for (const building of buildings) {
-    const option = document.createElement("option");
-    option.value = building;
-    option.textContent = buildingName(building);
-    select.append(option);
-  }
-  select.addEventListener("change", () => {
-    delete card.dataset.autoBuilding;
-    updateSuggestions(card);
-  });
-  const roomInput = query<HTMLInputElement>('input[type="text"]', card);
-  roomInput.addEventListener("input", () => inferBuilding(card));
-  roomInput.addEventListener("change", () => inferBuilding(card));
-  const colorInput = query<HTMLInputElement>('input[type="color"]', card);
-  colorInput.addEventListener("input", () => card.style.setProperty("--period-accent", colorInput.value));
-  updateSuggestions(card, false);
-  return card;
-}
-
 function readPeriods() {
-  return [...list.querySelectorAll<HTMLElement>(".period-card")].map((card) => ({
-    building: query<HTMLSelectElement>("select", card).value,
-    room: query<HTMLInputElement>('input[type="text"]', card).value.trim(),
-    color: query<HTMLInputElement>('input[type="color"]', card).value,
-  }));
+  return periods.map((period) => ({ ...period, room: period.room.trim() }));
 }
 
-function findRoom(period: Period) {
-  const building = period.building.trim().toUpperCase();
-  const roomName = period.room.trim().toUpperCase();
-  if (!building || !roomName) return null;
-  return rooms.find((room) => (
-    room.building === building &&
-    (room.id.toUpperCase() === roomName || room.label.toUpperCase() === roomName || `${room.label} (${room.id})`.toUpperCase() === roomName)
-  ));
-}
-
-function duplicateWarningText(periods = readPeriods()) {
-  const groups = new Map<string, { room: Room; periods: number[] }>();
-  periods.forEach((period, index) => {
-    const room = findRoom(period);
-    if (!room) return;
-    const group = groups.get(room.id) || { room, periods: [] };
-    group.periods.push(index + 1);
-    groups.set(room.id, group);
+function applyPeriods(next: Period[], { clearShare = true } = {}) {
+  const nextPeriods = PERIOD_COLORS.map((color, index) => {
+    const period = next[index];
+    return {
+      building: period && buildings.includes(period.building) ? period.building : "",
+      room: period?.room ?? "",
+      color: period && HEX_COLOR.test(period.color) ? period.color : color,
+    };
   });
-  return [...groups.values()]
-    .filter(({ periods: selectedPeriods }) => selectedPeriods.length > 1)
-    .map(({ room, periods: selectedPeriods }) => (
-      `Periods ${selectedPeriods.join(", ")} share ${room.label}; each color fills 1/${selectedPeriods.length} of the room.`
-    ))
-    .join(" ");
-}
-
-function updateDuplicateWarnings() {
-  warning.textContent = duplicateWarningText();
-}
-
-function showLegend(selected: SelectedRoom[]) {
-  legend.replaceChildren();
-  for (const item of selected) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "legend-item";
-    chip.setAttribute("aria-haspopup", "dialog");
-    chip.setAttribute("aria-label", `Period ${item.period}, ${item.label}: fire evacuation details`);
-    chip.addEventListener("click", () => openEvacuation(selectedRooms.get(item.id)));
-    const color = document.createElement("span");
-    color.className = "legend-color";
-    color.style.backgroundColor = item.color;
-    const label = document.createElement("span");
-    label.textContent = `P${item.period} · ${item.label}${item.floor === 2 ? " (2F)" : ""}`;
-    chip.append(color, label);
-    legend.append(chip);
-  }
-}
-
-function applyPeriods(periods: Period[], { clearShare = true } = {}) {
-  periods.forEach((period, index) => {
-    const card = list.children[index] as HTMLElement;
-    const select = query<HTMLSelectElement>("select", card);
-    const roomInput = query<HTMLInputElement>('input[type="text"]', card);
-    const colorInput = query<HTMLInputElement>('input[type="color"]', card);
-    delete card.dataset.autoBuilding;
-    select.value = buildings.includes(period.building) ? period.building : "";
-    roomInput.value = period.room;
-    inferBuilding(card);
-    colorInput.value = HEX_COLOR.test(period.color) ? period.color : PERIOD_COLORS[index];
-    card.style.setProperty("--period-accent", colorInput.value);
-  });
+  periods = nextPeriods;
+  periodEditor?.setPeriods(periods);
   if (clearShare) removeSharedSchedule();
   invalidatePreview();
 }
@@ -566,19 +473,20 @@ function loadSharedSchedule() {
 }
 
 async function shareSchedule() {
+  closeMoreMenu();
   const encoded = encodeURIComponent(JSON.stringify(readPeriods()));
   const shareUrl = `${window.location.origin}${window.location.pathname}${window.location.search}#${SHARE_PARAM}=${encoded}`;
   window.history.replaceState(null, "", shareUrl);
   try {
     await navigator.clipboard.writeText(window.location.href);
-    status.textContent = "Share link copied.";
+    showToast("Share link copied.");
   } catch {
-    status.textContent = "Share link ready in the address bar.";
+    showToast("Share link ready in the address bar.");
   }
-  status.classList.remove("error");
 }
 
 function openTemplateDialog() {
+  closeMoreMenu();
   templateName.value = `Schedule ${loadTemplates().length + 1}`;
   templateMessage.textContent = "";
   templateDialog.showModal();
@@ -601,23 +509,22 @@ function saveTemplate(event: Event) {
   }
   renderTemplateOptions(name);
   templateDialog.close();
-  status.textContent = `Template “${name}” saved.`;
-  status.classList.remove("error");
+  showToast(`${name} saved.`);
 }
 
 function loadSelectedTemplate() {
-  const name = templateSelect.value;
+  closeMoreMenu();
+  const name = decodeURIComponent(templateSelect.value || "");
   const template = loadTemplates().find((item) => item.name === name);
   deleteTemplateButton.disabled = !template;
   if (!template) return;
   applyPeriods(template.periods);
   saveDraft();
-  status.textContent = `Template “${name}” loaded.`;
-  status.classList.remove("error");
+  showToast(`${name} loaded.`);
 }
 
 function confirmTemplateDeletion() {
-  const name = templateSelect.value;
+  const name = decodeURIComponent(templateSelect.value || "");
   if (!name) return;
   pendingTemplateDeletion = name;
   query("#delete-template-description").textContent = `Delete the “${name}” template? Your current schedule will stay in the editor.`;
@@ -637,28 +544,29 @@ function deleteSelectedTemplate(event: Event) {
   renderTemplateOptions();
   deleteTemplateDialog.close();
   pendingTemplateDeletion = "";
-  status.textContent = `Template “${name}” deleted.`;
-  status.classList.remove("error");
+  showToast(`${name} deleted.`);
 }
 
 sampleButton.addEventListener("click", () => {
+  closeMoreMenu();
   applyPeriods(EXAMPLE.map(([building, room], index) => ({
     building,
     room,
     color: PERIOD_COLORS[index],
   })));
   saveDraft();
-  status.textContent = "Example loaded. Select Generate Map to preview it.";
-  status.classList.remove("error");
+  showToast("Example loaded. Select Generate Map to preview it.");
 });
 
 clearButton.addEventListener("click", () => {
+  closeMoreMenu();
   resetPeriods();
   invalidatePreview("Schedule cleared. Add rooms and generate a new map.");
   const cleared = clearDraft();
   showDraftStatus(cleared ? "Saved draft cleared." : "Saved draft could not be cleared.", !cleared);
   status.textContent = "Schedule cleared. Add rooms and generate a new map.";
   status.classList.remove("error");
+  showToast("Schedule cleared.");
 });
 
 shareButton.addEventListener("click", shareSchedule);
@@ -690,13 +598,10 @@ async function renderMap(requestRevision: number, requestedPeriods: Period[]) {
     downloadLink.href = result.image_url;
     downloadLink.classList.remove("is-disabled");
     downloadLink.setAttribute("aria-disabled", "false");
-    warning.textContent = result.warnings.join(" ") || duplicateWarningText(requestedPeriods);
     showRoomTargets(result.selected, result.map_size);
-    showLegend(result.selected);
     status.textContent = result.selected.length ? "Map ready. Click a room for fire evacuation details." : "Map ready.";
-    if (window.matchMedia("(max-width: 1100px)").matches) {
-      query(".preview").scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    mapPreviewDialog.showModal();
+    scheduleMarkerLayout();
     return true;
   } catch (error) {
     if (requestRevision === scheduleRevision) {
@@ -745,30 +650,52 @@ downloadLink.addEventListener("click", async (event) => {
 mapImage.addEventListener("click", () => window.open(mapImage.src, "_blank", "noopener"));
 mapImage.style.cursor = "zoom-in";
 
+const sharedSchedule = loadSharedSchedule();
+const draft = sharedSchedule ? null : loadDraft();
+periods = sharedSchedule ?? draft ?? periods;
+periodEditor = mountPeriodEditor(list, periods, rooms, buildings, (next) => {
+  periods = next;
+  scheduleEdited();
+});
+form.inert = true;
+form.setAttribute("aria-busy", "true");
+showDraftStatus("Loading room list…");
+
 async function init() {
   try {
     const response = await fetch("/api/rooms");
     if (!response.ok) throw new Error("Could not load the room list.");
     const data = await response.json() as { rooms: Room[]; buildings: string[] };
-    rooms = data.rooms;
-    buildings = data.buildings;
-    for (let number = 1; number <= 7; number += 1) list.append(createPeriod(number));
+    rooms.push(...data.rooms);
+    buildings.push(...data.buildings);
+    periods = periods.map((period) => {
+      if (period.building) return period;
+      const key = period.room.trim().toUpperCase();
+      const candidates = [...new Set(rooms
+        .filter((room) => [room.id, room.label, `${room.label} (${room.id})`, ...(room.aliases ?? [])]
+          .some((value) => value.toUpperCase() === key))
+        .map((room) => room.building))];
+      return candidates.length === 1 ? { ...period, building: candidates[0] } : period;
+    });
+    periodEditor?.setPeriods(periods);
+    form.inert = false;
+    form.removeAttribute("aria-busy");
     roomsLoaded = true;
     renderTemplateOptions();
-    const sharedSchedule = loadSharedSchedule();
-    const draft = loadDraft();
+    invalidatePreview("");
     if (sharedSchedule) {
-      applyPeriods(sharedSchedule, { clearShare: false });
       saveDraft();
       showDraftStatus("Schedule loaded from the share link.");
       status.textContent = "Shared schedule loaded. Select Generate Map to preview it.";
     } else if (draft) {
-      applyPeriods(draft);
       showDraftStatus("Draft restored from this device.");
     } else {
       showDraftStatus("Your schedule is saved locally as you edit it.");
     }
   } catch (error) {
+    form.inert = false;
+    form.removeAttribute("aria-busy");
+    showDraftStatus("Room list unavailable. Try reloading.", true);
     status.textContent = error instanceof Error ? error.message : String(error);
     status.classList.add("error");
     for (const control of [renderButton, sampleButton, clearButton, shareButton, templateSelect, saveTemplateButton, deleteTemplateButton]) {

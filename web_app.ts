@@ -80,12 +80,24 @@ export function createApp(outputDir=resolve(ROOT,'output')) {
         return send(res,200,JSON.stringify(await renderPeriods((body as {periods?:unknown}).periods,outputDir)));
       }
       if(req.method!=='GET') return send(res,req.method==='POST'?404:405,JSON.stringify({error:'Not found'}));
+      if(/^\/assets\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:js|css|woff2|woff|svg|png)$/.test(pathname)) {
+        const extension=pathname.slice(pathname.lastIndexOf('.')+1);
+        const contentType:Record<string,string>={js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',woff2:'font/woff2',woff:'font/woff',svg:'image/svg+xml',png:'image/png'};
+        try {return send(res,200,await readFile(resolve(ROOT,'dist/web',pathname.slice(1))),contentType[extension]);}
+        catch(error) {if((error as NodeJS.ErrnoException).code==='ENOENT') return send(res,404,JSON.stringify({error:'Not found'}));throw error;}
+      }
       if(pathname==='/api/rooms') return send(res,200,JSON.stringify({buildings,rooms:rooms.map(({id,label,building,floor,aliases})=>({id,label,building,floor:floor??1,aliases:aliases??[]}))}));
       if(pathname==='/favicon.ico') {res.writeHead(204);res.end();return;}
       const files:Record<string,[string,string]>={
         '/':['web/index.html','text/html; charset=utf-8'], '/evacuation':['web/evacuation.html','text/html; charset=utf-8'],
         '/evacuation/':['web/evacuation.html','text/html; charset=utf-8'], '/app.js':['dist/web/app.js','text/javascript; charset=utf-8'],
         '/evacuation.js':['dist/web/evacuation.js','text/javascript; charset=utf-8'], '/style.css':['web/style.css','text/css; charset=utf-8'],
+        '/ui.css':['dist/web/ui.css','text/css; charset=utf-8'],
+        '/manifest.webmanifest':['web/manifest.webmanifest','application/manifest+json; charset=utf-8'],
+        '/icon.svg':['web/icon.svg','image/svg+xml'],
+        '/apple-touch-icon.png':['web/apple-touch-icon.png','image/png'],
+        '/pwa-icon-192.png':['web/pwa-icon-192.png','image/png'],
+        '/pwa-icon-512.png':['web/pwa-icon-512.png','image/png'],
         '/map.png':['src/map/gunn_site_map.png','image/png'], '/evacuation-map.png':['src/map/gunn_evacuation_map.png','image/png']};
       let file=files[pathname];
       if(/^\/output\/period_map(?:_[0-9a-f]{32})?\.png$/.test(pathname)) file=[resolve(outputDir,pathname.split('/').pop()!),'image/png'];
