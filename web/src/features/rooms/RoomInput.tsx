@@ -10,6 +10,8 @@ interface RoomInputProps {
   placeholder: string;
   className?: string;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
   onValueChange(value: string): void;
   onBlur?(value: string, building: string): void;
 }
@@ -23,6 +25,8 @@ export function RoomInput({
   placeholder,
   className = "",
   disabled = false,
+  invalid = false,
+  describedBy,
   onValueChange,
   onBlur,
 }: RoomInputProps) {
@@ -63,6 +67,10 @@ export function RoomInput({
       defaultValue={value}
       placeholder={placeholder}
       aria-label={label}
+      aria-invalid={invalid}
+      aria-describedby={describedBy}
+      autoCapitalize="characters"
+      spellCheck={false}
       autoComplete="off"
     />
   );
