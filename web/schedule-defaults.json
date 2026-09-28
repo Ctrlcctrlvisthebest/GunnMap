@@ -1,0 +1,20 @@
+{
+  "periodColors": [
+    "#e11d48",
+    "#7c3aed",
+    "#0284c7",
+    "#059669",
+    "#f97316",
+    "#d4a017",
+    "#dc2626"
+  ],
+  "exampleSchedule": [
+    { "building": "F", "room": "F4" },
+    { "building": "M", "room": "M3" },
+    { "building": "J", "room": "J3" },
+    { "building": "K", "room": "K1" },
+    { "building": "N", "room": "N110" },
+    { "building": "N", "room": "N211" },
+    { "building": "", "room": "" }
+  ]
+}

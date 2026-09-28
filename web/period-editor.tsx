@@ -1,5 +1,7 @@
 import { Fragment, h, render } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { normalizeRoomInput, roomMatchesInput } from "./room-matching.js";
+import { mountRoomSuggestions, type RoomSuggestion } from "./room-suggestions.js";
 
 export interface Period {
   building: string;
@@ -7,13 +9,7 @@ export interface Period {
   color: string;
 }
 
-export interface RoomOption {
-  id: string;
-  label: string;
-  building: string;
-  floor?: number;
-  aliases?: string[];
-}
+export type RoomOption = RoomSuggestion;
 
 interface PeriodEditorProps {
   periods: Period[];
@@ -21,6 +17,7 @@ interface PeriodEditorProps {
   buildings: string[];
   resetKey: number;
   onChange(periods: Period[]): void;
+  onRoomNotice?(message: string): void;
 }
 
 export interface PeriodEditorHandle {
@@ -33,36 +30,82 @@ function buildingName(code: string) {
   return `${code} Building`;
 }
 
-function matchesRoom(room: RoomOption, value: string) {
-  const key = value.trim().toUpperCase();
-  return [room.id, room.label, `${room.label} (${room.id})`, ...(room.aliases ?? [])]
-    .some((candidate) => candidate.toUpperCase() === key);
-}
-
-function visibleRoomValue(room: RoomOption, candidates: RoomOption[]) {
-  if (candidates.filter((candidate) => candidate.label === room.label).length < 2) return room.label;
-  return room.aliases?.find((alias) => alias.startsWith(`${room.label} (`)) ?? room.label;
-}
-
 function inferredBuildings(periods: Period[], rooms: RoomOption[]) {
   return periods.map((period) => {
-    const matches = rooms.filter((room) => matchesRoom(room, period.room));
+    const matches = rooms.filter((room) => roomMatchesInput(room, period.room));
     const candidates = [...new Set(matches.map((room) => room.building))];
     return candidates.length === 1 && candidates[0] === period.building ? period.building : "";
   });
 }
 
-function PeriodList({ periods, rooms, buildings, resetKey, onChange }: PeriodEditorProps) {
+interface RoomInputProps {
+  id: string;
+  value: string;
+  building: string;
+  rooms: RoomOption[];
+  resetKey: number;
+  onInput(value: string): void;
+  onBlur(value: string, building: string): void;
+}
+
+function RoomInput({ id, value, building, rooms, resetKey, onInput, onBlur }: RoomInputProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const suggestionsRef = useRef<ReturnType<typeof mountRoomSuggestions> | null>(null);
+  const current = useRef({ building, onInput, onBlur });
+  current.current = { building, onInput, onBlur };
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "text";
+    input.placeholder = "e.g. N211";
+    input.setAttribute("aria-label", id.replaceAll("-", " "));
+    input.value = value;
+    host.replaceChildren(input);
+
+    const suggestions = mountRoomSuggestions(input, rooms, {
+      getBuilding: () => current.current.building,
+      onInput: (nextValue) => current.current.onInput(nextValue),
+    });
+    suggestionsRef.current = suggestions;
+    const handleBlur = () => current.current.onBlur(input.value, current.current.building);
+    input.addEventListener("blur", handleBlur);
+
+    return () => {
+      input.removeEventListener("blur", handleBlur);
+      suggestions.destroy();
+      suggestionsRef.current = null;
+      host.replaceChildren();
+    };
+  }, [id, rooms, rooms.length]);
+
+  useEffect(() => {
+    suggestionsRef.current?.refresh();
+  }, [building]);
+
+  useEffect(() => {
+    const input = hostRef.current?.querySelector("input");
+    if (input instanceof HTMLInputElement && input.value !== value) input.value = value;
+  }, [value, resetKey]);
+
+  return <div ref={hostRef} class="room-suggestion-host" />;
+}
+
+function PeriodList({ periods, rooms, buildings, resetKey, onChange, onRoomNotice }: PeriodEditorProps) {
   const [autoBuildings, setAutoBuildings] = useState<string[]>(() => inferredBuildings(periods, rooms));
 
-  useEffect(() => setAutoBuildings(inferredBuildings(periods, rooms)), [resetKey]);
+  useEffect(() => {
+    setAutoBuildings(inferredBuildings(periods, rooms));
+  }, [resetKey]);
 
   function updateRoom(index: number, value: string) {
     const next = periods.map((period) => ({ ...period }));
     const auto = [...autoBuildings];
     const period = next[index];
     period.room = value;
-    const matches = rooms.filter((room) => matchesRoom(room, value));
+    const matches = rooms.filter((room) => roomMatchesInput(room, value));
     const buildingCandidates = [...new Set(matches.map((room) => room.building))];
     if (buildingCandidates.length === 1) {
       period.building = buildingCandidates[0];
@@ -73,6 +116,17 @@ function PeriodList({ periods, rooms, buildings, resetKey, onChange }: PeriodEdi
     }
     setAutoBuildings(auto);
     onChange(next);
+  }
+
+  function roomNotice(value: string, building: string) {
+    if (!normalizeRoomInput(value)) return "";
+    const candidates = rooms.filter((room) =>
+      (!building || room.building === building) && roomMatchesInput(room, value));
+    if (candidates.length === 1) return "";
+    if (candidates.length > 1) {
+      return "More than one room matches. Choose its location from the suggestions.";
+    }
+    return "Room not found. Check the number or choose a listed suggestion.";
   }
 
   function updateBuilding(index: number, value: string) {
@@ -95,7 +149,6 @@ function PeriodList({ periods, rooms, buildings, resetKey, onChange }: PeriodEdi
     <Fragment>
       {periods.map((period, index) => {
         const number = index + 1;
-        const candidates = rooms.filter((room) => !period.building || room.building === period.building);
         return (
           <div class="period-card" data-period={number} style={{ "--period-accent": period.color }} key={number}>
             <div class="period-number" role="group" aria-label={`Period ${number}`}>
@@ -104,24 +157,18 @@ function PeriodList({ periods, rooms, buildings, resetKey, onChange }: PeriodEdi
             </div>
             <label class="field field-room">
               <span>Room</span>
-              <input
-                type="text"
-                list={`rooms-${number}`}
-                placeholder="e.g. N211"
-                autocomplete="off"
-                aria-label={`Period ${number} room`}
+              <RoomInput
+                id={`period-${number}-room`}
                 value={period.room}
-                onInput={(event) => updateRoom(index, event.currentTarget.value)}
+                building={period.building}
+                rooms={rooms}
+                resetKey={resetKey}
+                onInput={(value) => updateRoom(index, value)}
+                onBlur={(value, building) => {
+                  const message = roomNotice(value, building);
+                  if (message) onRoomNotice?.(message);
+                }}
               />
-              <datalist id={`rooms-${number}`}>
-                {candidates.map((room) => (
-                  <option
-                    value={visibleRoomValue(room, candidates)}
-                    label={`${buildingName(room.building)}${room.floor === 2 ? " · 2nd floor" : ""}`}
-                    key={room.id}
-                  />
-                ))}
-              </datalist>
             </label>
             <label class="field field-building">
               <span>Building</span>
@@ -161,6 +208,7 @@ export function mountPeriodEditor(
   rooms: RoomOption[],
   buildings: string[],
   onChange: (periods: Period[]) => void,
+  onRoomNotice?: (message: string) => void,
 ): PeriodEditorHandle {
   let periods = initialPeriods;
   let resetKey = 0;
@@ -176,6 +224,7 @@ export function mountPeriodEditor(
           draw();
           onChange(next);
         }}
+        onRoomNotice={onRoomNotice}
       />,
       target,
     );

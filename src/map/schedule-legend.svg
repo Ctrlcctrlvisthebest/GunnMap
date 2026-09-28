@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="__HEIGHT__" viewBox="0 0 420 __HEIGHT__">
+  <g font-family="sans-serif">
+    <rect x="0" y="0" width="420" height="__HEIGHT__" fill="white" stroke="#d0d5dd" stroke-width="2" />
+    <text x="24" y="50" font-size="26" fill="#182334">Schedule Legend</text>
+    <g display="__ROW_1_DISPLAY__"><rect x="24" y="70" width="22" height="22" fill="__ROW_1_COLOR__" /><text x="58" y="88" font-size="22" fill="#344054">__ROW_1_LABEL__</text></g>
+    <g display="__ROW_2_DISPLAY__"><rect x="24" y="104" width="22" height="22" fill="__ROW_2_COLOR__" /><text x="58" y="122" font-size="22" fill="#344054">__ROW_2_LABEL__</text></g>
+    <g display="__ROW_3_DISPLAY__"><rect x="24" y="138" width="22" height="22" fill="__ROW_3_COLOR__" /><text x="58" y="156" font-size="22" fill="#344054">__ROW_3_LABEL__</text></g>
+    <g display="__ROW_4_DISPLAY__"><rect x="24" y="172" width="22" height="22" fill="__ROW_4_COLOR__" /><text x="58" y="190" font-size="22" fill="#344054">__ROW_4_LABEL__</text></g>
+    <g display="__ROW_5_DISPLAY__"><rect x="24" y="206" width="22" height="22" fill="__ROW_5_COLOR__" /><text x="58" y="224" font-size="22" fill="#344054">__ROW_5_LABEL__</text></g>
+    <g display="__ROW_6_DISPLAY__"><rect x="24" y="240" width="22" height="22" fill="__ROW_6_COLOR__" /><text x="58" y="258" font-size="22" fill="#344054">__ROW_6_LABEL__</text></g>
+    <g display="__ROW_7_DISPLAY__"><rect x="24" y="274" width="22" height="22" fill="__ROW_7_COLOR__" /><text x="58" y="292" font-size="22" fill="#344054">__ROW_7_LABEL__</text></g>
+  </g>
+</svg>

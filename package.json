@@ -22,6 +22,7 @@
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",
     "@panzoom/panzoom": "^4.6.2",
+    "@tarekraafat/autocomplete.js": "^10.2.10",
     "preact": "^10.29.8",
     "sharp": "^0.35.4"
   },

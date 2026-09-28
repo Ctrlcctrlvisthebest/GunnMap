@@ -6,6 +6,7 @@ import { test } from "node:test";
 import vm from "node:vm";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
 import { ROOT, rooms as inventory } from "./project.js";
+import { setBoundedImageTransform } from "./web/map-pan-bounds.js";
 
 interface TestEvent { preventDefault(): void }
 type TestListener = (event: TestEvent) => unknown;
@@ -69,6 +70,7 @@ class Element {
     if (color) this.querySelector('input[type="color"]').value = color[1];
   }
   setAttribute(name: string, value: string) { this.attributes.set(name, String(value)); }
+  removeAttribute(name: string) { this.attributes.delete(name); }
   getAttribute(name: string) { return name === "src" ? this.src : this.attributes.get(name); }
   querySelector(selector: string): Element {
     const existing = this.fields.get(selector);
@@ -187,6 +189,11 @@ const frontendCode = transpileModule(readFileSync(join(ROOT, "web/app.ts"), "utf
   compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2022 },
   fileName: "web/app.ts",
 }).outputText;
+const scheduleDefaults = JSON.parse(readFileSync(join(ROOT, "web/schedule-defaults.json"), "utf8")) as {
+  periodColors: string[];
+  exampleSchedule: Period[];
+};
+const generatedMapSessionKey = "gunnmap_generated_map";
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 const deferred = <T = void>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -198,13 +205,17 @@ function resultFor(label: string) {
   const room = inventory.find(item => item.label === label);
   assert.ok(room, `Missing test room ${label}`);
   return {
-    image_url: `/output/${label}.png`, warnings: [], map_size: [2448, 1584],
+    image_url: imagePathFor(label), warnings: [], map_size: [2448, 1584],
     selected: [{
       ...room, period: 1, color: "#0284c7", marker: [1663.5, 574.5],
       evacuation: { status: "mapped", group: label === "M3" ? "blue" : "black",
         destination: label === "M3" ? "Blue assembly area" : "Football field", focus: null },
     }],
   };
+}
+function imagePathFor(label: string) {
+  const token = label.toLowerCase().padEnd(32, "0").slice(0, 32);
+  return `/output/period_map_${token}.png`;
 }
 
 const draftCookie = "gunnmap_schedule_draft";
@@ -215,6 +226,31 @@ const scheduleFor = (label: string) => {
   periods[0] = { building: label[0].toUpperCase(), room: label, color: "#0284c7" };
   return periods;
 };
+
+test("map panning is clamped to the image edges at its current zoom", () => {
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      getComputedStyle: () => ({
+        paddingLeft: "10px",
+        paddingRight: "10px",
+        paddingTop: "10px",
+        paddingBottom: "10px",
+      }),
+    },
+  });
+  const image = { offsetWidth: 600, offsetHeight: 400, style: { transform: "" } } as unknown as HTMLElement;
+  const viewport = { clientWidth: 500, clientHeight: 300 } as unknown as HTMLElement;
+  try {
+    assert.deepEqual(setBoundedImageTransform(image, viewport, { x: 1000, y: -1000, scale: 1 }), { x: 60, y: -60 });
+    assert.equal(image.style.transform, "scale(1) translate(60px, -60px)");
+    assert.deepEqual(setBoundedImageTransform(image, viewport, { x: 1000, y: -1000, scale: 2 }), { x: 180, y: -130 });
+  } finally {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis, "window");
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  }
+});
 
 async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWrites = true }: HarnessOptions = {}) {
   const document = new TestDocument();
@@ -231,15 +267,29 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
     },
   });
   const get = (selector: string) => document.querySelector(selector);
-  get("#map-image").src = "/map.png";
-  get("#download-link").classList.add("is-disabled");
   let timerId = 0;
   const timers = new Map<number, () => void>();
   const io: { render: (options: RenderRequest) => Promise<TestResponse>; decode: () => Promise<void>; clipboard: string } = { render: async () => response(resultFor("M3")), decode: async () => {}, clipboard: "" };
+  const currentUrl = new URL(`http://localhost:8765/${hash}`);
+  const sessionValues = new Map<string, string>();
+  let lastNavigation = "";
+  const location = {
+    get href() { return currentUrl.href; },
+    get hash() { return currentUrl.hash; },
+    get origin() { return currentUrl.origin; },
+    get pathname() { return currentUrl.pathname; },
+    get search() { return currentUrl.search; },
+    assign(url: string) { lastNavigation = new URL(url, currentUrl).href; },
+  };
   const window = {
     matchMedia: () => ({ matches: false }),
-    location: new URL(`http://localhost:8765/${hash}`),
-    history: { replaceState(_state: unknown, _title: string, url: string | URL) { window.location = new URL(url, window.location); } },
+    location,
+    history: { replaceState(_state: unknown, _title: string, url: string | URL) { currentUrl.href = new URL(url, currentUrl).href; } },
+    sessionStorage: {
+      getItem(key: string) { return sessionValues.get(key) ?? null; },
+      setItem(key: string, value: string) { sessionValues.set(key, value); },
+      removeItem(key: string) { sessionValues.delete(key); },
+    },
     setTimeout(callback: () => void) { timerId += 1; timers.set(timerId, callback); return timerId; },
     clearTimeout(id: number) { timers.delete(id); },
     open() {},
@@ -247,10 +297,22 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
   vm.runInNewContext(frontendCode, {
     exports: {},
     require: (name: string) => {
-      assert.equal(name, "./period-editor.js");
-      return { mountPeriodEditor };
+      if (name === "./site-shell.js") return {};
+      if (name === "./ui-components.js") return {};
+      if (name === "./period-editor.js") return { mountPeriodEditor };
+      if (name === "./room-matching.js") {
+        return {
+          roomMatchesInput: (room: typeof inventory[number], value: string) =>
+            [room.id, room.label, `${room.label} (${room.id})`, ...(room.aliases ?? [])]
+              .some(candidate => candidate.replace(/[\s-]+/g, "").toLowerCase() === value.replace(/[\s-]+/g, "").toLowerCase()),
+        };
+      }
+      if (name === "./schedule-defaults.json") return { default: scheduleDefaults };
+      if (name === "./map-pan-bounds.js") return { setBoundedImageTransform() { return { x: 0, y: 0 }; } };
+      if (name === "@panzoom/panzoom") return { default: () => { throw new Error("Panzoom is not expected in the state harness"); } };
+      throw new Error(`Unexpected frontend dependency: ${name}`);
     },
-    document, URLSearchParams, requestAnimationFrame: () => 1,
+    document, URLSearchParams, performance: { now: () => Date.now() }, requestAnimationFrame: () => 1,
     ResizeObserver: class { observe() {} },
     Image: class { decode() { return io.decode(); } },
     Option: class extends Element { constructor(text: string, value: string) { super(); this.textContent = text; this.value = value; } },
@@ -274,21 +336,18 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
   };
   const submit = () => get("#period-form").trigger("submit");
   const assertCleared = () => {
-    for (const selector of ["#room-markers", "#room-hit-areas", "#legend"]) {
-      assert.equal(get(selector).children.length, 0, `${selector} still contains old room data`);
-    }
-    assert.equal(get("#map-image").src, "/map.png");
-    assert.equal(get("#download-link").getAttribute("aria-disabled"), "true");
-    assert.equal(get("#room-click-help").hidden, true);
-    assert.equal(get("#room-evacuation").open, false);
-    assert.equal(get("#map-preview-dialog").open, false);
+    assert.equal(window.sessionStorage.getItem(generatedMapSessionKey), null);
+  };
+  const assertGeneratedMap = (imagePath: string) => {
+    assert.equal(window.sessionStorage.getItem(generatedMapSessionKey), imagePath);
+    const destination = new URL(lastNavigation);
+    assert.equal(destination.pathname, "/generate-map");
+    assert.equal(destination.searchParams.get("image"), imagePath);
   };
   if (renderOnStart) {
     setRoom("M3");
     await submit();
-    assert.equal(get("#room-markers").children.length, 1);
-    assert.equal(get("#map-image").src, "/output/M3.png");
-    assert.equal(get("#map-preview-dialog").open, true);
+    assertGeneratedMap(imagePathFor("M3"));
   }
   function readCookie(name: typeof draftCookie): Draft | null;
   function readCookie(name: typeof templateCookie): Template[] | null;
@@ -307,7 +366,19 @@ async function harness({ renderOnStart = true, cookies = {}, hash = "", cookieWr
     get("#template-name").value = name;
     await get("#template-form").trigger("submit");
   };
-  return { get, io, window, readCookie, readPeriods, setRoom, submit, assertCleared, saveTemplate };
+  return {
+    get,
+    io,
+    window,
+    readCookie,
+    readPeriods,
+    setRoom,
+    submit,
+    assertCleared,
+    assertGeneratedMap,
+    saveTemplate,
+    get lastNavigation() { return lastNavigation; },
+  };
 }
 
 test("room entry infers buildings from inventory without altering entered text", async () => {
@@ -359,10 +430,8 @@ test("restored room-only drafts infer a building and clear it when the room beco
 });
 
 for (const event of ["input", "change"]) {
-  test(`${event} clears old M3 details before N214 is regenerated`, async () => {
+  test(`${event} clears the prior generated map before N214 is regenerated`, async () => {
     const h = await harness();
-    await h.get("#room-markers").children[0].trigger("click");
-    assert.equal(h.get("#assembly-destination").textContent, "Blue assembly area");
     h.setRoom("n214");
     await h.get("#period-form").trigger(event);
     h.assertCleared();
@@ -371,29 +440,30 @@ for (const event of ["input", "change"]) {
       return response(resultFor("N214"));
     };
     await h.submit();
-    await h.get("#room-markers").children[0].trigger("click");
-    assert.equal(h.get("#assembly-destination").textContent, "Football field");
+    h.assertGeneratedMap(imagePathFor("N214"));
   });
 }
 
-test("loading the example clears the previous clickable map", async () => {
+test("loading the example clears the previous generated map", async () => {
   const h = await harness();
   await h.get("#sample-button").trigger("click");
   h.assertCleared();
   assert.match(h.get("#toast-region").textContent, /Example loaded/);
 });
 
-test("failed regeneration never leaves old room targets or downloads", async () => {
+test("failed regeneration leaves no stale generated map", async () => {
   const h = await harness();
+  const previousNavigation = h.lastNavigation;
   h.io.render = async () => response({ error: "Room not found" }, false);
   await h.submit();
   h.assertCleared();
-  assert.equal(h.get("#status").textContent, "Room not found");
-  assert.equal(h.get("#status").classList.contains("error"), true);
+  assert.equal(h.get("#toast-region").textContent, "Room not found");
+  assert.equal(h.lastNavigation, previousNavigation);
 });
 
 test("editing while a response is pending discards the old response", async () => {
   const h = await harness();
+  const previousNavigation = h.lastNavigation;
   const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
   const submit = h.submit();
@@ -402,11 +472,12 @@ test("editing while a response is pending discards the old response", async () =
   pending.resolve(response(resultFor("M3")));
   await submit;
   h.assertCleared();
-  assert.match(h.get("#status").textContent, /Schedule changed/);
+  assert.equal(h.lastNavigation, previousNavigation, "an outdated render must not navigate to the map page");
 });
 
-test("editing while an image decodes cannot publish its stale room markers", async () => {
+test("editing while an image decodes cannot publish its stale PNG", async () => {
   const h = await harness();
+  const previousNavigation = h.lastNavigation;
   const pending = deferred();
   let decoding = false;
   h.io.decode = () => { decoding = true; return pending.promise; };
@@ -418,7 +489,7 @@ test("editing while an image decodes cannot publish its stale room markers", asy
   pending.resolve();
   await submit;
   h.assertCleared();
-  assert.match(h.get("#status").textContent, /Schedule changed/);
+  assert.equal(h.lastNavigation, previousNavigation, "an outdated image decode must not navigate to the map page");
 });
 
 test("editing saves a draft that restores all seven periods and colors", async () => {
@@ -431,7 +502,6 @@ test("editing saves a draft that restores all seven periods and colors", async (
   assert.deepEqual(draft.periods, h.readPeriods());
   const restored = await harness({ renderOnStart: false, cookies: { [draftCookie]: draft } });
   assert.deepEqual(restored.readPeriods(), draft.periods);
-  assert.match(restored.get("#draft-status").textContent, /Draft restored/);
   restored.assertCleared();
 });
 
@@ -457,7 +527,6 @@ test("saving, loading and deleting a named template preserves evacuation freshne
   h.setRoom("M3");
   await h.get("#period-form").trigger("input");
   await h.submit();
-  await h.get("#room-markers").children[0].trigger("click");
   h.get("#template-select").value = "Monday";
   await h.get("#template-select").trigger("change");
   assert.equal(h.readPeriods()[0].room, "N214");
@@ -472,7 +541,7 @@ test("saving, loading and deleting a named template preserves evacuation freshne
   assert.equal(h.readPeriods()[0].room, "N214");
 });
 
-test("template loads discard old render responses as well as rendered markers", async () => {
+test("template loads discard old render responses as well as old PNG previews", async () => {
   const h = await harness({ cookies: { [templateCookie]: [{ name: "Field", periods: scheduleFor("N214") }] } });
   const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
@@ -495,9 +564,12 @@ test("shared schedules round-trip and take precedence over the local draft", asy
     hash: new URL(h.io.clipboard).hash,
     cookies: { [draftCookie]: { version: 1, periods: scheduleFor("M3") } },
   });
+  assert.equal(restored.get("#shared-schedule-dialog").open, true);
+  assert.equal(restored.readPeriods()[0].room, "M3", "the local schedule remains untouched before confirmation");
+  await restored.get("#shared-use-once").trigger("click");
   assert.deepEqual(restored.readPeriods(), h.readPeriods());
-  assert.match(restored.get("#draft-status").textContent, /share link/);
-  assert.match(restored.window.location.hash, /schedule=/);
+  assert.match(restored.get("#toast-region").textContent, /shared schedule loaded for this session/i);
+  assert.equal(restored.window.location.hash, "", "accepting the shared schedule consumes the link fragment");
   restored.setRoom("N211");
   await restored.get("#period-form").trigger("input");
   assert.equal(restored.window.location.hash, "");
@@ -509,76 +581,83 @@ test("invalid saved and shared data cannot break initialization", async () => {
     [draftCookie]: { version: 1, periods: [{ room: "N214" }] },
     [templateCookie]: [{ name: "Bad data", periods: [null] }],
   } });
-  assert.equal(h.get("#template-select").children.length, 1);
+  assert.equal(h.get("#template-select").children.length, 0);
   assert.equal(h.readCookie(draftCookie), null);
-  assert.equal(h.get("#status").classList.contains("error"), false);
   h.setRoom("N214");
+  h.io.render = async () => response(resultFor("N214"));
   await h.submit();
-  assert.equal(h.get("#room-markers").children.length, 1);
+  h.assertGeneratedMap(imagePathFor("N214"));
 });
 
 test("blocked cookies report save failures while map generation remains available", async () => {
   const h = await harness({ cookieWrites: false });
   await h.get("#period-form").trigger("input");
-  assert.equal(h.get("#draft-status").classList.contains("error"), true);
+  assert.match(h.get("#toast-region").textContent, /Draft could not be saved/);
   await h.saveTemplate();
   assert.match(h.get("#template-message").textContent, /could not be saved/);
   assert.equal(h.get("#template-dialog").open, true);
   await h.submit();
-  assert.equal(h.get("#room-markers").children.length, 1);
+  h.assertGeneratedMap(imagePathFor("M3"));
 });
 
-test("repeated classrooms use one multicolor target and each legend opens all periods", async () => {
+test("repeated classrooms render to one PNG without an extra warning or DOM markers", async () => {
   const h = await harness();
   h.setRoom("n214", 0, "#e11d48");
   h.setRoom("N214", 1, "#0284c7");
   await h.get("#period-form").trigger("input");
-  assert.match(h.get("#warning").textContent, /Periods 1, 2 share N214/);
+  const indexHtml = readFileSync(join(ROOT, "web/index.html"), "utf8");
+  assert.doesNotMatch(indexHtml, /id="warning"|room-markers|room-tooltips|room-evacuation/);
   const result = resultFor("N214");
   result.selected[0].color = "#e11d48";
   result.selected.push({ ...result.selected[0], period: 2, color: "#0284c7" });
   h.io.render = async () => response(result);
   await h.submit();
-  assert.equal(h.get("#room-markers").children.length, 1);
-  assert.equal(h.get("#room-hit-areas").children.length, 1);
-  const marker = h.get("#room-markers").children[0];
-  assert.equal(marker.children[0].textContent, "1/2");
-  assert.match(marker.style["--period-colors"], /#e11d48 0% 50%, #0284c7 50% 100%/);
-  assert.equal(h.get("#legend").children.length, 2);
-  await h.get("#legend").children[1].trigger("click");
-  assert.equal(h.get("#room-dialog-periods").textContent, "Periods 1, 2");
-  assert.equal(h.get("#assembly-destination").textContent, "Football field");
+  h.assertGeneratedMap(imagePathFor("N214"));
 });
 
-test("download generates a current PNG once even while Generate Map is pending", async () => {
+test("blank periods are allowed and only filled rooms are sent for map generation", async () => {
+  const h = await harness({ renderOnStart: false });
+  h.setRoom("N214");
+  let submitted: Period[] = [];
+  h.io.render = async options => {
+    submitted = JSON.parse(options.body).periods as Period[];
+    return response(resultFor("N214"));
+  };
+  await h.submit();
+  assert.equal(submitted.length, 7);
+  assert.equal(submitted[0].room, "N214");
+  assert.ok(submitted.slice(1).every(period => period.room === "" && period.building === ""));
+  h.assertGeneratedMap(imagePathFor("N214"));
+});
+
+test("repeated Generate Map submissions share one pending render", async () => {
   const h = await harness();
   h.setRoom("N214");
   await h.get("#period-form").trigger("input");
   const pending = deferred<TestResponse>();
   let requests = 0;
   h.io.render = () => { requests += 1; return pending.promise; };
-  const submission = h.submit();
-  const download = h.get("#download-link").trigger("click");
-  await h.get("#download-link").trigger("click");
+  const firstSubmission = h.submit();
+  const secondSubmission = h.submit();
   assert.equal(requests, 1);
   pending.resolve(response(resultFor("N214")));
-  await Promise.all([submission, download]);
-  assert.equal(h.get("#download-link").clicks, 1);
-  assert.equal(h.get("#download-link").href, "/output/N214.png");
+  await Promise.all([firstSubmission, secondSubmission]);
+  h.assertGeneratedMap(imagePathFor("N214"));
 });
 
-test("editing during automatic download never downloads the stale image", async () => {
+test("editing during a pending render never navigates to its stale image", async () => {
   const h = await harness();
+  const previousNavigation = h.lastNavigation;
   await h.get("#period-form").trigger("input");
   const pending = deferred<TestResponse>();
   h.io.render = () => pending.promise;
-  const download = h.get("#download-link").trigger("click");
+  const submission = h.submit();
   h.setRoom("N214");
   await h.get("#period-form").trigger("input");
   pending.resolve(response(resultFor("M3")));
-  await download;
+  await submission;
   h.assertCleared();
-  assert.equal(h.get("#download-link").clicks, 0);
+  assert.equal(h.lastNavigation, previousNavigation);
 });
 
 test("template dialogs allow cancellation and require an explicit delete confirmation", async () => {

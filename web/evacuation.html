@@ -16,17 +16,18 @@
     <script type="module" src="/evacuation.js"></script>
   </head>
   <body>
-    <aside class="site-sidebar" aria-label="GunnMap navigation">
+    <header class="site-sidebar">
       <a class="brand" href="/" aria-label="GunnMap home">
-        <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></svg></span>
+        <span class="brand-mark icon-campus" aria-hidden="true"></span>
         <span class="brand-name">Gunn<span>Map</span></span>
       </a>
-      <div class="nav-label">CAMPUS MAPS</div>
-      <nav class="site-nav" aria-label="Campus maps">
-        <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15M15 6v15"/></svg><span>Schedule Map</span></a>
-        <a href="/evacuation" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M8 5h8a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h8"/></svg><span>Evacuation Routes</span></a>
-      </nav>
-    </aside>
+    </header>
+    <nav class="site-nav" aria-label="Campus maps">
+      <a href="/"><span class="nav-icon icon-campus" aria-hidden="true"></span><span>Schedule Map</span></a>
+      <a href="/evacuation" aria-current="page"><span class="nav-icon icon-routes" aria-hidden="true"></span><span>Evacuation Routes</span></a>
+      <a href="/find-room"><span class="nav-icon icon-search" aria-hidden="true"></span><span>Find a Room</span></a>
+      <a href="/generate-map"><span class="nav-icon icon-generated-map" aria-hidden="true"></span><span>Generated Map</span></a>
+    </nav>
     <div class="app-content">
     <main id="main-content" class="evacuation-layout" tabindex="-1">
       <section class="panel evacuation-panel" aria-labelledby="evacuation-title">
@@ -36,13 +37,24 @@
             <button id="map-info-open" class="map-info-button" type="button" aria-label="Read the map legend and reference notes">i</button>
           </div>
           <div class="map-links">
-            <button id="evacuation-map-fullsize" class="download-link" type="button">Open Full Size</button>
             <a class="download-link" href="/evacuation-map.png" download="gunn-evacuation-map.png">Download PNG</a>
           </div>
         </div>
-        <button id="evacuation-map-open" class="evacuation-map-open" type="button" aria-label="Open interactive evacuation map">
-          <img src="/evacuation-map.png" alt="Gunn campus evacuation reference map. Open the map to zoom and pan." />
-        </button>
+        <div class="evacuation-map-frame">
+          <button id="evacuation-map-open" class="evacuation-map-open" type="button" aria-label="Open interactive evacuation map">
+            <span class="evacuation-map-art">
+              <img src="/evacuation-map.png" alt="Gunn campus evacuation reference map. Open the map to zoom and pan." />
+            </span>
+          </button>
+          <span id="evacuation-schedule-overlays" class="evacuation-schedule-overlays" role="group" aria-label="Your schedule rooms on the evacuation map"></span>
+        </div>
+        <section id="schedule-evacuation" class="schedule-evacuation" aria-labelledby="schedule-evacuation-title" hidden>
+          <div>
+            <h2 id="schedule-evacuation-title">Your schedule's assembly points</h2>
+            <p class="map-help">Based on the rooms saved on this device.</p>
+          </div>
+          <div id="schedule-evacuation-list" class="schedule-evacuation-list"></div>
+        </section>
       </section>
     </main>
 
@@ -54,48 +66,13 @@
         </div>
         <form method="dialog"><button class="dialog-close" aria-label="Close map information">×</button></form>
       </div>
-      <div class="route-groups">
-        <article class="panel route-group route-red">
-          <h3><span class="route-swatch" aria-hidden="true"></span>Red markings</h3>
-          <ul>
-            <li>H1–H3, H4–H5</li>
-            <li>G1–G3, G4–G7</li>
-            <li>F1–F2, F4–F6</li>
-            <li>PREP</li>
-          </ul>
-        </article>
-        <article class="panel route-group route-blue">
-          <h3><span class="route-swatch" aria-hidden="true"></span>Blue markings</h3>
-          <ul>
-            <li>M1–M5</li>
-            <li>P105, P115, P117</li>
-            <li>S101, S102, S121</li>
-            <li>S147</li>
-          </ul>
-        </article>
-        <article class="panel route-group route-green">
-          <h3><span class="route-swatch" aria-hidden="true"></span>Green markings</h3>
-          <ul>
-            <li>E1–E2; C4–C8; C1–C3</li>
-            <li>D, B, A</li>
-            <li>Bow Gym, Titan Gym</li>
-            <li>K1–K5, K6–K13</li>
-            <li>L1–L4, L5–L8</li>
-          </ul>
-        </article>
-        <article class="panel route-group route-black">
-          <h3><span class="route-swatch" aria-hidden="true"></span>Black markings</h3>
-          <ul>
-            <li>J1–J5, J6–J10</li>
-            <li>N201–N217</li>
-            <li>N101–N117</li>
-          </ul>
-          <p>These group labels appear on the football field in the image.</p>
-        </article>
-      </div>
+      <div id="route-groups" class="route-groups" aria-live="polite"></div>
       <div class="map-reference-notes" role="note">
         <p>Reference only. Follow current school staff directions during an emergency.</p>
-        <p>The supplied image does not show a revision date. Unlisted rooms have no assigned route.</p>
+        <p id="source-provenance">Loading source information…</p>
+        <p id="evacuation-validation-status" role="status"></p>
+        <p id="evacuation-inventory-notes"></p>
+        <p>Unlisted rooms have no assigned route.</p>
       </div>
     </dialog>
 
@@ -106,7 +83,10 @@
       </div>
       <p class="map-viewer-help">Drag to move; scroll or pinch to zoom.</p>
       <div id="evacuation-map-stage" class="evacuation-map-stage" role="region" aria-label="Interactive evacuation map" tabindex="0">
-        <img id="evacuation-viewer-image" src="/evacuation-map.png" alt="Gunn campus evacuation reference map with room group labels and marked routes." />
+        <div id="evacuation-viewer-art" class="evacuation-map-art">
+          <img id="evacuation-viewer-image" src="/evacuation-map.png" alt="Gunn campus evacuation reference map with room group labels and marked routes." />
+          <span id="evacuation-viewer-overlays" class="evacuation-schedule-overlays" role="group" aria-label="Your schedule rooms on the evacuation map"></span>
+        </div>
       </div>
     </dialog>
 

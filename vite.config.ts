@@ -12,6 +12,8 @@ export default defineConfig({
       input: {
         app: resolve(process.cwd(), "web/app.ts"),
         evacuation: resolve(process.cwd(), "web/evacuation.ts"),
+        "find-room": resolve(process.cwd(), "web/find-room.ts"),
+        "generate-map": resolve(process.cwd(), "web/generate-map.ts"),
       },
       output: {
         entryFileNames: "[name].js",
