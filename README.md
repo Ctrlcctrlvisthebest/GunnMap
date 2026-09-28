@@ -2,7 +2,24 @@
 
 An unofficial campus map for Henry M. Gunn High School. The browser app, Node.js server, map tools, and checks are written in TypeScript. No Python runtime is required.
 
-![Mobile GunnMap schedule editor](output/demo_ui.png)
+<table>
+  <tr>
+    <th>Schedule Map</th>
+    <th>Generated Map</th>
+  </tr>
+  <tr>
+    <td><img src="output/demo_schedule.webp" alt="GunnMap Schedule Map page" width="440"></td>
+    <td><img src="output/demo_ui.webp" alt="GunnMap Generated Map page" width="440"></td>
+  </tr>
+  <tr>
+    <th>Evacuation Routes</th>
+    <th>Find a Room</th>
+  </tr>
+  <tr>
+    <td><img src="output/demo_evacuation.webp" alt="GunnMap Evacuation Routes page" width="440"></td>
+    <td><img src="output/demo_find_room.webp" alt="GunnMap Find a Room page" width="440"></td>
+  </tr>
+</table>
 
 ## Run
 
