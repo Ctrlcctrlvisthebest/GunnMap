@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRoomInput } from './web/room-matching.js';
+import { normalizeRoomInput } from './src/domain/room-matching.js';
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = existsSync(resolve(here, 'room_regions.json')) ? here : resolve(here, '..');
 export function readJson<T>(name: string): T {

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
-import { roomMatchesInput } from './web/room-matching.js';
+import { roomMatchesInput } from './src/domain/room-matching.js';
 import { evacuationDataIssues, evacuationForRoom, evacuationOverview } from './evacuation.js';
 import { renderRooms, xml } from './map_highlighter.js';
 export { resolveRoom } from './project.js';
@@ -258,16 +258,13 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
 
       const files: Record<string, [string, string]> = {
         '/': ['web/index.html', 'text/html; charset=utf-8'],
-        '/evacuation': ['web/evacuation.html', 'text/html; charset=utf-8'],
-        '/evacuation/': ['web/evacuation.html', 'text/html; charset=utf-8'],
-        '/find-room': ['web/find-room.html', 'text/html; charset=utf-8'],
-        '/find-room/': ['web/find-room.html', 'text/html; charset=utf-8'],
-        '/generate-map': ['web/generate-map.html', 'text/html; charset=utf-8'],
-        '/generate-map/': ['web/generate-map.html', 'text/html; charset=utf-8'],
-        '/app.js': ['dist/web/app.js', 'text/javascript; charset=utf-8'],
-        '/evacuation.js': ['dist/web/evacuation.js', 'text/javascript; charset=utf-8'],
-        '/find-room.js': ['dist/web/find-room.js', 'text/javascript; charset=utf-8'],
-        '/generate-map.js': ['dist/web/generate-map.js', 'text/javascript; charset=utf-8'],
+        '/evacuation': ['web/index.html', 'text/html; charset=utf-8'],
+        '/evacuation/': ['web/index.html', 'text/html; charset=utf-8'],
+        '/find-room': ['web/index.html', 'text/html; charset=utf-8'],
+        '/find-room/': ['web/index.html', 'text/html; charset=utf-8'],
+        '/generate-map': ['web/index.html', 'text/html; charset=utf-8'],
+        '/generate-map/': ['web/index.html', 'text/html; charset=utf-8'],
+        '/main.js': ['dist/web/main.js', 'text/javascript; charset=utf-8'],
         '/style.css': ['web/style.css', 'text/css; charset=utf-8'],
         '/ui.css': ['dist/web/ui.css', 'text/css; charset=utf-8'],
         '/manifest.webmanifest': ['web/manifest.webmanifest', 'application/manifest+json; charset=utf-8'],

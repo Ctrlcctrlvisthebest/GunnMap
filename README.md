@@ -1,6 +1,6 @@
 # GunnMap
 
-An unofficial campus map for Henry M. Gunn High School. The browser app, Node.js server, map tools, and checks are written in TypeScript. No Python runtime is required.
+An unofficial campus map for Henry M. Gunn High School. The React browser app, Node.js server, map tools, and checks are written in TypeScript. No Python runtime is required.
 
 <table>
   <tr>
@@ -37,9 +37,25 @@ npm run build
 npm start -- --port 8080
 ```
 
-The server binds to `127.0.0.1` by default. Set `HOST` and `PORT` to configure it. `npm run dev` compiles the browser TypeScript before starting the server. After editing browser code, run `npm run build:web` and reload the page, or restart the development server.
+The server binds to `127.0.0.1` by default. Set `HOST` and `PORT` to configure it. `npm run dev` type-checks and bundles the browser app before starting the server. After editing browser code, run `npm run build:web` and reload the page, or restart the development server.
 
-Compiled files live in `dist/`, including browser modules in `dist/web/`. Keep the repository's `web/` pages, JSON data, and `src/map/` assets alongside `dist/` when deploying. The server serves generated browser modules and static assets from these locations.
+Compiled files live in `dist/`, including the React browser bundle in `dist/web/`. Keep `web/index.html`, `web/style.css`, the web app manifest and icons, `public/assets/`, and `src/map/` alongside `dist/` when deploying. The server serves the same SPA shell for all four routes and delivers its bundle and static assets from these locations.
+
+## Browser app structure
+
+The browser is a React single-page app with routes for Schedule Map, Evacuation Routes, Find a Room, and Generated Map. The shared shell owns navigation and the mobile brand scroll position; each route is a page component. Schedule persistence and editing, room lookup and suggestions, evacuation data, and map pan/zoom live in feature modules. Shared Web Awesome controls and toast notifications live in `web/src/shared/`. Room matching is shared across the browser and Node service in `src/domain/room-matching.ts`. Keep page-specific UI in `web/src/pages/` and put reusable domain behavior in the feature that owns it. The Node server, Sharp map renderer, room data, and API contracts remain outside the React UI.
+
+```text
+web/
+  index.html
+  style.css
+  src/
+    app/          # React bootstrap, routes, and persistent site shell
+    pages/        # Schedule, evacuation, room lookup, and generated map
+    features/     # Schedule, rooms, maps, and evacuation behavior
+    shared/       # Web Awesome registration, controls, and notifications
+src/domain/       # Domain rules shared by the browser and Node server
+```
 
 ## Campus maps
 
@@ -67,7 +83,7 @@ The navigation links to Schedule Map, Evacuation Routes, Find a Room, and Genera
 
 `room_regions.json` stores the 146 active room polygons and stable IDs, including the N-building second floor. `room_index.csv` lists labels, IDs, and disambiguating aliases. The background combines the [district site map](https://resources.finalsite.net/images/v1737500165/pausdorg/zmi9kqvwvpzd975e09bz/GunnSiteMap2025-26.pdf) with the supplied second-floor reference. The N-building overlay and schedule legend are SVG assets in `src/map/`. Browser navigation icons are external SVG assets in `public/assets/`. Editable building regions remain in `building_regions.json`. Original images and the PDF are in `src/map/`. V rooms, Titan Gym, Spangenberg Theater S130, the pool, and most athletic spaces are excluded; selectable Bow Gym rooms are BG111, BG138, and BG117. Some room boundaries are approximate where the source map has no visible dividing line.
 
-Period colors and evacuation groups are independent. Default colors and the example schedule are stored in `web/schedule-defaults.json`. `n214`, `N214`, and `n-214` resolve to the same second-floor room and the football-field section **N201–N217**. The two K6 rooms are distinguished by their upper and lower map locations; stable R-numbers remain accepted for older shared schedules. Stale render requests are discarded, and each render gets an independent image URL so different tabs cannot overwrite each other's maps.
+Period colors and evacuation groups are independent. Default colors and the example schedule are stored in `web/src/features/schedule/schedule-defaults.json`. `n214`, `N214`, and `n-214` resolve to the same second-floor room and the football-field section **N201–N217**. The two K6 rooms are distinguished by their upper and lower map locations; stable R-numbers remain accepted for older shared schedules. Stale render requests are discarded, and each render gets an independent image URL so different tabs cannot overwrite each other's maps.
 
 `evacuation_data.json` records room assignments, group colors, the source hash, and source dimensions. The app checks the supplied image, room inventory, assignment boundaries and overlaps, group labels, and reference coordinates. The supplied image has no revision date, and a manual verification date has not been recorded; both remain explicitly unknown. `evacuation.ts` leaves unlisted rooms unconfirmed, including E01 rather than guessing it means E1. This is a reference, not live emergency routing; follow current school staff instructions.
 
@@ -105,4 +121,4 @@ npm test
 npm run build
 ```
 
-The tests use Node's `assert` library as test-only checks for room matching, evacuation assignments, map rendering, API validation, generated assets, and browser state. These assertions report regressions when a check fails; they are not runtime assertions in the app. Evacuation boundary cases are stored in `evacuation_test_cases.json`. `npm test` builds the browser modules before running the TypeScript checks. Both server and browser TypeScript configurations enable strict type checking.
+The tests use Node's `assert` library for room matching, map panning bounds, schedule defaults, evacuation assignments, map rendering, API validation, and generated assets. These assertions report regressions when a check fails; they are not runtime assertions in the app. Evacuation boundary cases are stored in `evacuation_test_cases.json`. `npm test` builds the browser app before running the TypeScript checks. Both server and browser TypeScript configurations enable strict type checking.

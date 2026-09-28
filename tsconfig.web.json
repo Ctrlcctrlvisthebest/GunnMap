@@ -10,10 +10,9 @@
     "resolveJsonModule": true,
     "noEmitOnError": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "preact",
-    "rootDir": "web",
+    "rootDir": ".",
     "outDir": "dist/web",
     "sourceMap": true
   },
-  "include": ["web/*.ts", "web/*.tsx"]
+  "include": ["web/src/**/*.ts", "web/src/**/*.tsx"]
 }

@@ -1,5 +1,6 @@
 import autoComplete from "@tarekraafat/autocomplete.js";
 import "@tarekraafat/autocomplete.js/dist/css/autoComplete.02.css";
+import { buildingName } from "./room-display.js";
 
 export interface RoomSuggestion {
   id: string;
@@ -66,12 +67,6 @@ function suggestionRecords(rooms: RoomSuggestion[], building: string, input: str
   });
 }
 
-function displayBuilding(code: string) {
-  if (code === "BG") return "Bow Gym";
-  if (code === "D") return "D Building / Library";
-  return `${code} Building`;
-}
-
 export function mountRoomSuggestions(
   input: HTMLInputElement,
   rooms: RoomSuggestion[],
@@ -109,7 +104,8 @@ export function mountRoomSuggestions(
 
         const location = document.createElement("small");
         location.className = "room-suggestion-option-location";
-        location.textContent = `${displayBuilding(suggestion.building)}${suggestion.floor === 2 ? " · 2nd floor" : ""}`;
+        const floor = suggestion.floor === 2 ? " · 2nd floor" : "";
+        location.textContent = `${buildingName(suggestion.building)}${floor}`;
         item.replaceChildren(label, location);
       },
     },

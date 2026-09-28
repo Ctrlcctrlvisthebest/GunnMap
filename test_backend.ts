@@ -167,10 +167,11 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   assert.equal((await fetch(base+'/api/render',{method:'POST',body:'x'.repeat(16001)})).status,400);
   const staticPaths = [
    '/',
-   '/app.js',
+   '/main.js',
    '/style.css',
    '/evacuation',
-   '/evacuation.js',
+   '/find-room',
+   '/generate-map',
    '/evacuation-map.png',
    '/map.png',
    '/manifest.webmanifest',
@@ -190,13 +191,13 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
    /^application\/manifest\+json/,
   );
   assert.equal((await manifestResponse.json()).display, 'standalone');
-  for(const name of ['app','evacuation']) {
-   const script=await fetch(`${base}/${name}.js`);
-   assert.match(script.headers.get('content-type')??'',/^text\/javascript/);
-   assert.equal(await script.text(),await readFile(join(ROOT,'dist','web',`${name}.js`),'utf8'));
-   const page=await (await fetch(base+(name==='app'?'/':'/evacuation'))).text();
-   assert.match(page,new RegExp(`<script type="module" src="/${name}\\.js"></script>`));
-   assert.equal((await fetch(`${base}/${name}.ts`)).status,404);
+  const script=await fetch(`${base}/main.js`);
+  assert.match(script.headers.get('content-type')??'',/^text\/javascript/);
+  assert.equal(await script.text(),await readFile(join(ROOT,'dist','web','main.js'),'utf8'));
+  for (const route of ['/', '/evacuation', '/find-room', '/generate-map']) {
+   const page=await (await fetch(base+route)).text();
+   assert.match(page,/<div id="root"><\/div>/);
+   assert.match(page,/<script type="module" src="\/main\.js"><\/script>/);
   }
   const invalidOutputPaths = [
    '/output/../room_regions.json',

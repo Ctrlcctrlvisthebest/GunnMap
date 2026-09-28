@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { normalizeRoomInput } from './web/room-matching.js';
+import { normalizeRoomInput } from './src/domain/room-matching.js';
 import { readJson, ROOT, rooms } from './project.js';
 type Group = 'red' | 'blue' | 'green' | 'black';
 type Pixels = [number, number, number, number];
