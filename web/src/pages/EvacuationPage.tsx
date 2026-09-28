@@ -49,14 +49,12 @@ function markerRoute(entry: ScheduleEvacuationEntry) {
 }
 
 function sourceProvenance(overview: EvacuationOverview) {
-  const sourceName = overview.provenance.sourceFile.split("/").pop()
-    ?? "source image";
-  const version = overview.provenance.sourceImageSha256.slice(0, 8);
+  const sourceName = overview.provenance.originalFilename;
   const revision = overview.provenance.sourceRevisionDate
     ?? "not shown on the supplied image";
   const verified = overview.provenance.verifiedOn ?? "not recorded";
 
-  return `Source: ${sourceName} · image version ${version} · revision date ${revision} · checked ${verified}.`;
+  return `User-supplied reference: ${sourceName}. Reference revision date: ${revision}. Verification date: ${verified}.`;
 }
 
 function ScheduleMarkers({
@@ -130,7 +128,7 @@ export function EvacuationPage() {
     (entry): entry is EntryWithMarker => entry.marker !== null,
   );
 
-  usePanzoom(viewerStage, viewerArt, viewerImage, {
+  const mapControls = usePanzoom(viewerStage, viewerArt, viewerImage, {
     active: viewerOpen,
     fit: true,
   });
@@ -254,7 +252,7 @@ export function EvacuationPage() {
   const validationMessage = overview
     ? overview.validationIssues.length
       ? `Data check needs review: ${overview.validationIssues.join(" ")}`
-      : "Data check passed: source image, room inventory, group labels, and reference coordinates match."
+      : "Reference data is internally consistent. This does not confirm current school instructions."
     : "Evacuation data could not be checked.";
   const validationClassName = overview?.validationIssues.length
     ? "is-error"
@@ -446,12 +444,20 @@ export function EvacuationPage() {
             ×
           </button>
         </div>
-        <p className="map-viewer-help">Drag to move; scroll or pinch to zoom.</p>
+        <div className="map-controls" role="group" aria-label="Evacuation map controls">
+          <button className="download-link" type="button" onClick={mapControls.zoomIn} aria-label="Zoom in on evacuation map">Zoom in</button>
+          <button className="download-link" type="button" onClick={mapControls.zoomOut} aria-label="Zoom out on evacuation map">Zoom out</button>
+          <button className="download-link" type="button" onClick={mapControls.reset}>Reset map</button>
+        </div>
+        <p className="map-viewer-help" id="evacuation-map-help">
+          Drag to move; scroll or pinch to zoom. With the map focused, use +/− to zoom, arrow keys to move, and Home or 0 to reset.
+        </p>
         <div
           ref={viewerStage}
           className="evacuation-map-stage"
           role="region"
           aria-label="Interactive evacuation map"
+          aria-describedby="evacuation-map-help"
           tabIndex={0}
         >
           <div ref={viewerArt} className="evacuation-map-art">

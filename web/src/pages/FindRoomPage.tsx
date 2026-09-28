@@ -31,7 +31,7 @@ export function FindRoomPage() {
         scale: 2,
       }
     : undefined;
-  usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus });
+  const controls = usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus });
 
   useEffect(() => {
     let current = true;
@@ -149,7 +149,7 @@ export function FindRoomPage() {
               label="Room or room alias"
               value={input}
               rooms={rooms}
-              placeholder="e.g. N214 or library"
+              placeholder="e.g. A134 or library"
               onValueChange={handleInputChange}
             />
           </label>
@@ -227,14 +227,20 @@ export function FindRoomPage() {
                 Download PNG
               </a>
             </div>
-            <p className="map-help">
-              Drag to move · Scroll or pinch to zoom
+            <div className="map-controls" role="group" aria-label="Map zoom">
+              <button type="button" className="download-link" onClick={controls.zoomOut} aria-label="Zoom out">−</button>
+              <button type="button" className="download-link" onClick={controls.zoomIn} aria-label="Zoom in">+</button>
+              <button type="button" className="download-link" onClick={controls.reset}>Reset view</button>
+            </div>
+            <p id="room-map-help" className="map-help">
+              Drag to move · Scroll or pinch to zoom · Focus the map to use +/−, arrow keys or Home.
             </p>
             <div
               ref={stage}
               className="room-locator-stage"
               role="region"
               aria-label="Zoomable campus map"
+              aria-describedby="room-map-help"
               tabIndex={0}
             >
               <div ref={art} className="room-locator-art">
