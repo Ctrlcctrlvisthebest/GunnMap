@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRoomInput } from './src/domain/room-matching.js';
+import { findRoomMatches, normalizeRoomInput } from './src/domain/room-matching.js';
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = existsSync(resolve(here, 'room_regions.json')) ? here : resolve(here, '..');
 export function readJson<T>(name: string): T {
@@ -18,17 +18,16 @@ export const rooms = roomData.rooms;
 export const buildings = [...new Set(rooms.map(room => room.building))].sort((a,b) => a === 'BG' ? 1 : b === 'BG' ? -1 : a.localeCompare(b));
 export const normalize = normalizeRoomInput;
 export function resolveRoom(building: string, value: string): Room {
-  const inventory = rooms.filter(room => room.building === building);
-  if (!inventory.length) throw new Error(`Unknown building: ${building}`);
-  const key = (value.trim().match(/^.+\((R\d{3})\)$/i)?.[1] ?? value.trim()).toLowerCase();
-  const byId = rooms.find(room => room.id.toLowerCase() === key);
-  if (byId) {
-    if (byId.building !== building) throw new Error(`${byId.label} is not in ${building} Building`);
-    return byId;
+  const canonicalBuilding = buildings.find(candidate => normalize(candidate) === normalize(building));
+  if (!canonicalBuilding) throw new Error(`Unknown building: ${building}`);
+  const matches = findRoomMatches(rooms, value, canonicalBuilding);
+  if (!matches.length) {
+    const key = normalize(value);
+    const byId = findRoomMatches(rooms, value).find(room =>
+      key === normalize(room.id) || key.endsWith(`(${normalize(room.id)})`));
+    if (byId) throw new Error(`${byId.label} is not in ${canonicalBuilding} Building`);
+    throw new Error(`Room '${value}' was not found in ${canonicalBuilding} Building`);
   }
-  const matches = inventory.filter(room => [room.label, ...(room.aliases ?? [])]
-    .some(label => normalize(label) === normalize(value)));
-  if (!matches.length) throw new Error(`Room '${value}' was not found in ${building} Building`);
   if (matches.length > 1) {
     const choices = matches.map(room => room.aliases?.[0] ?? room.label).join(', ');
     throw new Error(

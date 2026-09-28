@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "dist/web",
-    emptyOutDir: false,
+    emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
       input: resolve(process.cwd(), "web/src/app/main.tsx"),

@@ -1,45 +1,25 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
-import { roomMatchesInput } from './src/domain/room-matching.js';
+import { findRoomMatches } from './src/domain/room-matching.js';
 import { evacuationDataIssues, evacuationForRoom, evacuationOverview } from './evacuation.js';
 import { renderRooms, xml } from './map_highlighter.js';
+import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_CLEANUP_INTERVAL_MS, removeExpiredMap, validateRetentionMs } from './output_retention.js';
 export { resolveRoom } from './project.js';
 class InputError extends Error {}
 interface LegendItem { period: number; label: string; floor: number; color: string }
-const GENERATED_MAP_LIMIT = 100;
-const GENERATED_MAP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const REVALIDATE_STATIC = 'no-cache';
-let generatedMapCleanup = Promise.resolve();
+const compressGzip = promisify(gzip);
 
 const evacuationIssues = evacuationDataIssues();
 if (evacuationIssues.length) {
   console.error('Evacuation data needs review:', evacuationIssues.join(' '));
-}
-
-async function cleanupGeneratedMaps(outputDir: string) {
-  const cleanup = generatedMapCleanup.then(async () => {
-    const files = (await readdir(outputDir))
-      .filter((filename) => /^period_map_[0-9a-f]{32}\.png$/.test(filename));
-    const entries = await Promise.all(files.map(async (filename) => ({
-      filename,
-      modifiedAt: (await stat(resolve(outputDir, filename))).mtimeMs,
-    })));
-    const expiration = Date.now() - GENERATED_MAP_MAX_AGE_MS;
-    const expired = entries.filter((entry) => entry.modifiedAt < expiration);
-    const retained = entries
-      .filter((entry) => entry.modifiedAt >= expiration)
-      .sort((left, right) => right.modifiedAt - left.modifiedAt);
-    const excess = retained.slice(GENERATED_MAP_LIMIT);
-    await Promise.all([...expired, ...excess].map((entry) =>
-      rm(resolve(outputDir, entry.filename), { force: true })));
-  });
-  generatedMapCleanup = cleanup.catch(() => undefined);
-  await cleanup;
 }
 
 async function addScheduleLegend(image: Buffer, selected: LegendItem[]): Promise<Buffer> {
@@ -106,7 +86,7 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
       period: index,
       id: room.id,
       label: room.label,
-      building,
+      building: room.building,
       floor: room.floor ?? 1,
       color,
       polygon: room.polygon,
@@ -130,16 +110,14 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
   await mkdir(outputDir, { recursive: true });
   const id = randomUUID().replaceAll('-', '');
   const filename = `period_map_${id}.png`;
-  const latest = resolve(outputDir, `.latest_map_${id}.png`);
-  await writeFile(resolve(outputDir, filename), bytes, { flag: 'wx' });
+  const temporary = resolve(outputDir, `.${filename}.tmp`);
   try {
-    await writeFile(latest, bytes);
-    await rename(latest, resolve(outputDir, 'period_map.png'));
+    await writeFile(temporary, bytes, { flag: 'wx' });
+    await rename(temporary, resolve(outputDir, filename));
   } finally {
-    await rm(latest, { force: true });
+    await rm(temporary, { force: true });
   }
 
-  await cleanupGeneratedMaps(outputDir);
   return { image_url: `/output/${filename}`, selected, warnings, map_size: roomData.image_size };
 }
 
@@ -157,26 +135,56 @@ function send(
   res.end(body);
 }
 
-function sendCached(
+function encodingQualities(header: string | undefined) {
+  const encodings = new Map<string, number>();
+  for (const token of header?.split(',') ?? []) {
+    const [name, ...parameters] = token.trim().toLowerCase().split(';');
+    const qualityParameter = parameters.map(value => value.trim()).find(value => value.startsWith('q='));
+    const quality = qualityParameter === undefined ? 1 : Number(qualityParameter.slice(2));
+    encodings.set(name, Number.isFinite(quality) && quality >= 0 && quality <= 1 ? quality : 0);
+  }
+  return {
+    gzip: encodings.get('gzip') ?? encodings.get('*') ?? 0,
+    identity: encodings.get('identity') ?? (encodings.get('*') === 0 ? 0 : 1),
+  };
+}
+
+async function sendCached(
   req: IncomingMessage,
   res: ServerResponse,
   body: Buffer,
   type: string,
   cacheControl = REVALIDATE_STATIC,
+  extraHeaders: Record<string, string> = {},
 ) {
-  const etag = `"${createHash('sha256').update(body).digest('base64url')}"`;
-  if (req.headers['if-none-match'] === etag) {
-    res.writeHead(304, { 'Cache-Control': cacheControl, ETag: etag });
+  const text = /^(?:text\/|application\/(?:json|javascript|manifest\+json)|image\/svg\+xml)/.test(type);
+  const quality = encodingQualities(req.headers['accept-encoding']);
+  const useGzip = text && quality.gzip > 0 && quality.gzip >= quality.identity && (body.length >= 1024 || quality.identity === 0);
+  if (!useGzip && quality.identity === 0) {
+    res.setHeader('Vary', 'Accept-Encoding');
+    return send(res, 406, JSON.stringify({ error: 'No acceptable content encoding' }));
+  }
+  const representation = useGzip ? await compressGzip(body) : body;
+  const etag = `"${createHash('sha256').update(representation).digest('base64url')}"`;
+  const headers = {
+    'Content-Type': type,
+    'Cache-Control': cacheControl,
+    ETag: etag,
+    ...(text ? { Vary: 'Accept-Encoding' } : {}),
+    ...(useGzip ? { 'Content-Encoding': 'gzip' } : {}),
+    ...extraHeaders,
+  };
+  const validators = req.headers['if-none-match']?.split(',').map(value => value.trim().replace(/^W\//, ''));
+  if (validators?.some(value => value === '*' || value === etag)) {
+    res.writeHead(304, headers);
     res.end();
     return;
   }
   res.writeHead(200, {
-    'Content-Type': type,
-    'Content-Length': body.length,
-    'Cache-Control': cacheControl,
-    ETag: etag,
+    ...headers,
+    'Content-Length': representation.length,
   });
-  res.end(body);
+  res.end(representation);
 }
 async function payload(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -196,8 +204,35 @@ async function payload(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-export function createApp(outputDir = resolve(ROOT, 'output')) {
-  return createServer(async (req, res) => {
+export interface AppOptions { retentionMs?: number; cleanupIntervalMs?: number }
+export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptions = {}) {
+  const retentionMs = validateRetentionMs(options.retentionMs ?? configuredRetentionMs());
+  const cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
+  if (!Number.isFinite(cleanupIntervalMs) || cleanupIntervalMs <= 0 || cleanupIntervalMs > 2 ** 31 - 1) {
+    throw new Error('Cleanup interval must be between 1 and 2147483647 milliseconds');
+  }
+  const roomList = rooms.map(({ id, label, building, floor, aliases }) => ({
+    id, label, building, floor: floor ?? 1, aliases: aliases ?? [],
+  }));
+  const roomDirectory = Buffer.from(JSON.stringify({ buildings, rooms: roomList }));
+  const locatedRooms = rooms.map(room => ({
+    id: room.id,
+    label: room.label,
+    building: room.building,
+    floor: room.floor ?? 1,
+    aliases: room.aliases ?? [],
+    polygon: room.polygon,
+    marker: [
+      (room.label_box[0] + room.label_box[2]) / 2,
+      (room.label_box[1] + room.label_box[3]) / 2,
+    ],
+    evacuation: evacuationForRoom(room),
+  }));
+  const offlineRoomDirectory = Buffer.from(JSON.stringify({ rooms: locatedRooms, map_size: roomData.image_size }));
+  // Inventory and assignments are loaded once at startup. Avoid repeating the
+  // synchronous image provenance check on every public API request.
+  const evacuationDirectory = Buffer.from(JSON.stringify(evacuationOverview()));
+  const server = createServer(async (req, res) => {
     try {
       const requestUrl = new URL(req.url ?? '/', 'http://localhost');
       const pathname = requestUrl.pathname;
@@ -218,37 +253,19 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
         return send(res, status, JSON.stringify({ error: 'Not found' }));
       }
       if (pathname === '/api/rooms') {
-        const roomList = rooms.map(({ id, label, building, floor, aliases }) => ({
-          id,
-          label,
-          building,
-          floor: floor ?? 1,
-          aliases: aliases ?? [],
-        }));
-        return send(res, 200, JSON.stringify({ buildings, rooms: roomList }));
+        return await sendCached(req, res, roomDirectory, 'application/json; charset=utf-8');
+      }
+      if (pathname === '/api/offline-rooms') {
+        return await sendCached(req, res, offlineRoomDirectory, 'application/json; charset=utf-8');
       }
       if (pathname === '/api/room-lookup') {
         const query = requestUrl.searchParams.get('q')?.trim() ?? '';
         if (!query) throw new InputError('Enter a room number or room alias.');
-        const matches = rooms
-          .filter((room) => roomMatchesInput(room, query))
-          .map((room) => ({
-            id: room.id,
-            label: room.label,
-            building: room.building,
-            floor: room.floor ?? 1,
-            aliases: room.aliases ?? [],
-            polygon: room.polygon,
-            marker: [
-              (room.label_box[0] + room.label_box[2]) / 2,
-              (room.label_box[1] + room.label_box[3]) / 2,
-            ],
-            evacuation: evacuationForRoom(room),
-          }));
+        const matches = findRoomMatches(locatedRooms, query);
         return send(res, 200, JSON.stringify({ rooms: matches, map_size: roomData.image_size }));
       }
       if (pathname === '/api/evacuation-data') {
-        return send(res, 200, JSON.stringify(evacuationOverview()));
+        return await sendCached(req, res, evacuationDirectory, 'application/json; charset=utf-8');
       }
       if (pathname === '/favicon.ico') {
         res.writeHead(204);
@@ -265,6 +282,7 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
         '/generate-map': ['web/index.html', 'text/html; charset=utf-8'],
         '/generate-map/': ['web/index.html', 'text/html; charset=utf-8'],
         '/main.js': ['dist/web/main.js', 'text/javascript; charset=utf-8'],
+        '/sw.js': ['dist/web/sw.js', 'text/javascript; charset=utf-8'],
         '/style.css': ['web/style.css', 'text/css; charset=utf-8'],
         '/ui.css': ['dist/web/ui.css', 'text/css; charset=utf-8'],
         '/manifest.webmanifest': ['web/manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
@@ -278,10 +296,10 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
 
       let file = files[pathname];
       let cacheControl = REVALIDATE_STATIC;
-      const generatedMap = pathname.match(/^\/output\/(period_map(?:_([0-9a-f]{32}))?)\.png$/);
+      const generatedMap = pathname.match(/^\/output\/(period_map_[0-9a-f]{32}\.png)$/);
       if (generatedMap) {
-        file = [resolve(outputDir, generatedMap[1] + '.png'), 'image/png'];
-        if (generatedMap[2]) cacheControl = 'public, max-age=604800, immutable';
+        await removeExpiredMap(outputDir, generatedMap[1], retentionMs);
+        file = [resolve(outputDir, generatedMap[1]), 'image/png'];
       }
 
       const assetPath = pathname.match(/^\/assets\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:js|css|woff2|woff|svg|png)$/);
@@ -306,7 +324,9 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
       }
       try {
         const bytes = await readFile(resolve(ROOT, file[0]));
-        return sendCached(req, res, bytes, file[1], cacheControl);
+        if (generatedMap) return send(res, 200, bytes, file[1]);
+        const extraHeaders: Record<string, string> = pathname === '/sw.js' ? { 'Service-Worker-Allowed': '/' } : {};
+        return await sendCached(req, res, bytes, file[1], cacheControl, extraHeaders);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
           return send(res, 404, JSON.stringify({ error: 'Not found' }));
@@ -323,6 +343,21 @@ export function createApp(outputDir = resolve(ROOT, 'output')) {
       if (!(error instanceof InputError)) console.error(error);
     }
   });
+  let timer: NodeJS.Timeout | undefined;
+  let cleaning: Promise<unknown> | undefined;
+  const cleanup = () => {
+    if (cleaning) return;
+    cleaning = cleanupGeneratedMaps(outputDir, retentionMs)
+      .catch(error => console.error('Unable to clean up expired maps', error))
+      .finally(() => { cleaning = undefined; });
+  };
+  server.on('listening', () => {
+    cleanup();
+    timer = setInterval(cleanup, cleanupIntervalMs);
+    timer.unref();
+  });
+  server.on('close', () => { if (timer) clearInterval(timer); timer = undefined; });
+  return server;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const portIndex = process.argv.indexOf('--port');
