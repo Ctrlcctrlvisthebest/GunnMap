@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { CSSVariables } from "../../shared/css-types.js";
-import { roomMatchesInput, normalizeRoomInput } from "../../../../src/domain/room-matching.js";
+import { findRoomMatches } from "../../../../src/domain/room-matching.js";
 import { RoomInput } from "../rooms/RoomInput.js";
-import { buildingName } from "../rooms/room-display.js";
+import { buildingName, roomLocationLabel } from "../rooms/room-display.js";
+import { periodRoomState } from "./room-validation.js";
 import { WebAwesomeColorPicker, WebAwesomeSelect } from "../../shared/WebAwesomeControls.js";
 import { PERIOD_COLORS } from "./schedule-storage.js";
 import type { Period } from "./types.js";
@@ -14,7 +15,6 @@ interface PeriodEditorProps {
   buildings: string[];
   disabled?: boolean;
   onChange(next: Period[], previous: Period[]): void;
-  onRoomNotice?(message: string): void;
 }
 
 export function PeriodEditor({
@@ -23,10 +23,9 @@ export function PeriodEditor({
   buildings,
   disabled = false,
   onChange,
-  onRoomNotice,
 }: PeriodEditorProps) {
   const [autoBuildings, setAutoBuildings] = useState<string[]>(() => periods.map((period) => {
-    const matches = rooms.filter((room) => roomMatchesInput(room, period.room));
+    const matches = findRoomMatches(rooms, period.room);
     const candidates = [...new Set(matches.map((room) => room.building))];
     return candidates.length === 1 && candidates[0] === period.building
       ? period.building
@@ -35,7 +34,7 @@ export function PeriodEditor({
 
   useEffect(() => {
     setAutoBuildings(periods.map((period) => {
-      const matches = rooms.filter((room) => roomMatchesInput(room, period.room));
+      const matches = findRoomMatches(rooms, period.room);
       const candidates = [...new Set(matches.map((room) => room.building))];
       return candidates.length === 1 && candidates[0] === period.building
         ? period.building
@@ -55,7 +54,7 @@ export function PeriodEditor({
   function updateRoom(index: number, value: string) {
     update(index, (period, nextAuto) => {
       period.room = value;
-      const matches = rooms.filter(room => roomMatchesInput(room, value));
+      const matches = findRoomMatches(rooms, value);
       const candidates = [...new Set(matches.map(room => room.building))];
       if (candidates.length === 1) {
         period.building = candidates[0];
@@ -67,28 +66,20 @@ export function PeriodEditor({
     });
   }
 
-  function notice(value: string, building: string) {
-    if (!normalizeRoomInput(value)) return;
-    const matches = rooms.filter(room => {
-      const buildingMatches = !building || room.building === building;
-      return buildingMatches && roomMatchesInput(room, value);
-    });
-
-    if (matches.length > 1) {
-      onRoomNotice?.("More than one room matches. Choose its location from the suggestions.");
-    } else if (!matches.length) {
-      onRoomNotice?.("Room not found. Check the number or choose a listed suggestion.");
-    }
-  }
-
   return (
     <div className="period-list">
       {periods.map((period, index) => {
         const number = index + 1;
+        const { matches, state, invalid } = periodRoomState(period, rooms);
+        const feedback = state === "empty" ? "No class this period"
+          : state === "matched" ? `Found ${roomLocationLabel(matches[0])} · ${buildingName(matches[0].building)}${matches[0].floor === 2 ? " · 2nd floor" : ""}`
+          : state === "ambiguous" ? "More than one room matches. Choose a location below."
+          : `Room not found${period.building ? ` in ${buildingName(period.building)}` : ""}. Check the room or building.`;
         return (
           <div
             className="period-card"
             data-period={number}
+            data-room-state={disabled ? "loading" : state}
             style={{ "--period-accent": period.color } as CSSVariables}
             key={number}
           >
@@ -110,8 +101,9 @@ export function PeriodEditor({
                 rooms={rooms}
                 placeholder="e.g. N211"
                 disabled={disabled}
+                invalid={!disabled && invalid}
+                describedBy={`period-${number}-feedback`}
                 onValueChange={value => updateRoom(index, value)}
-                onBlur={notice}
               />
             </label>
             <label className="field field-building">
@@ -123,7 +115,6 @@ export function PeriodEditor({
                 onValueChange={value => {
                   update(index, (current, nextAuto) => {
                     current.building = value;
-                    current.room = "";
                     nextAuto[index] = "";
                   });
                 }}
@@ -136,6 +127,19 @@ export function PeriodEditor({
                 ))}
               </WebAwesomeSelect>
             </label>
+            <p className="period-room-feedback" id={`period-${number}-feedback`} aria-live="polite">
+              {disabled ? "Loading room list…" : feedback}
+            </p>
+            {!disabled && state === "ambiguous" && (
+              <div className="period-room-choices" aria-label={`Choose period ${number} room`}>
+                {matches.map(room => (
+                  <button className="room-lookup-choice" type="button" key={room.id}
+                    onClick={() => updateRoom(index, roomLocationLabel(room) === room.label ? `${room.label} (${room.id})` : roomLocationLabel(room))}>
+                    {roomLocationLabel(room) === room.label ? `${room.label} (${room.id})` : roomLocationLabel(room)}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="field field-color">
               <span>Color</span>
               <WebAwesomeColorPicker

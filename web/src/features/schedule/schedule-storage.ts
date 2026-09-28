@@ -1,16 +1,24 @@
-import scheduleDefaults from "./schedule-defaults.json";
+import scheduleDefaults from "./schedule-defaults.json" with { type: "json" };
 import type { Period, ScheduleTemplate } from "./types.js";
 
 export const PERIOD_COLORS = scheduleDefaults.periodColors;
 export const EXAMPLE_SCHEDULE = scheduleDefaults.exampleSchedule;
-export const DRAFT_COOKIE_NAME = "gunnmap_schedule_draft";
-export const CURRENT_SCHEDULE_KEY = "gunnmap_current_schedule";
-export const TEMPLATES_COOKIE_NAME = "gunnmap_schedule_templates";
-export const GENERATED_MAP_SESSION_KEY = "gunnmap_generated_map";
+export const DRAFT_COOKIE_NAME = "gunnmap_v2_schedule_draft";
+export const CURRENT_SCHEDULE_KEY = "gunnmap_v2_current_schedule";
+export const TEMPLATES_COOKIE_NAME = "gunnmap_v2_schedule_templates";
+export const GENERATED_MAP_SESSION_KEY = "gunnmap_v2_generated_map";
+const SHARED_PREVIEW_KEY = "gunnmap_v2_shared_preview";
+const LEGACY_DRAFT_COOKIE_NAME = "gunnmap_schedule_draft";
+const LEGACY_TEMPLATES_COOKIE_NAME = "gunnmap_schedule_templates";
 export const SHARE_PARAM = "schedule";
 
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+// A restricted browser may reject session storage. Keep route changes within
+// this SPA session from silently substituting the unrelated device draft.
+let currentScheduleInMemory: Period[] | null = null;
+let sharedPreviewInMemory: Period[] | null = null;
+const copyPeriods = (periods: Period[]) => periods.map(period => ({ ...period }));
 
 interface ScheduleDraft {
   version: 1;
@@ -59,17 +67,12 @@ function setCookie(name: string, value: string) {
   return getCookie(name) === value;
 }
 
-function removeCookie(name: string) {
-  document.cookie = `${encodeURIComponent(name)}=; max-age=0; path=/; SameSite=Lax`;
-}
-
 export function loadDraft(): Period[] | null {
   try {
-    const saved = getCookie(DRAFT_COOKIE_NAME);
+    const saved = getCookie(DRAFT_COOKIE_NAME) ?? getCookie(LEGACY_DRAFT_COOKIE_NAME);
     if (!saved) return null;
     const draft: unknown = JSON.parse(saved);
     if (!isRecord(draft) || draft.version !== 1 || !isValidPeriods(draft.periods)) {
-      removeCookie(DRAFT_COOKIE_NAME);
       return null;
     }
     return draft.periods;
@@ -88,14 +91,15 @@ export function saveDraft(periods: Period[]) {
 
 export function clearDraft() {
   try {
-    removeCookie(DRAFT_COOKIE_NAME);
-    return getCookie(DRAFT_COOKIE_NAME) === null;
+    // An explicit empty v2 draft prevents the legacy draft from reappearing.
+    return setCookie(DRAFT_COOKIE_NAME, "null");
   } catch {
     return false;
   }
 }
 
 export function saveCurrentSchedule(periods: Period[]) {
+  currentScheduleInMemory = copyPeriods(periods);
   try {
     sessionStorage.setItem(CURRENT_SCHEDULE_KEY, JSON.stringify({ version: 1, periods }));
   } catch {
@@ -103,26 +107,31 @@ export function saveCurrentSchedule(periods: Period[]) {
   }
 }
 
+export function saveSharedPreview(periods: Period[] | null) {
+  sharedPreviewInMemory = periods ? copyPeriods(periods) : null;
+  try {
+    if (periods) sessionStorage.setItem(SHARED_PREVIEW_KEY, JSON.stringify(periods));
+    else sessionStorage.removeItem(SHARED_PREVIEW_KEY);
+  } catch {
+    // The in-memory fallback survives SPA route changes without using cookies.
+  }
+}
+
+export function loadSharedPreview(): Period[] | null {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(SHARED_PREVIEW_KEY) ?? "null");
+    return isValidPeriods(saved) ? saved : null;
+  } catch { return sharedPreviewInMemory ? copyPeriods(sharedPreviewInMemory) : null; }
+}
+
 export function readCurrentSchedule(): Period[] {
   let saved: string | null = null;
   try {
     saved = sessionStorage.getItem(CURRENT_SCHEDULE_KEY);
   } catch {
-    saved = null;
+    return currentScheduleInMemory ? copyPeriods(currentScheduleInMemory) : loadDraft() ?? [];
   }
-  if (!saved) {
-    const entry = document.cookie
-      .split("; ")
-      .find((item) => item.startsWith(`${DRAFT_COOKIE_NAME}=`));
-    if (entry) {
-      try {
-        saved = decodeURIComponent(entry.slice(`${DRAFT_COOKIE_NAME}=`.length));
-      } catch {
-        saved = null;
-      }
-    }
-  }
-  if (!saved) return [];
+  if (!saved) return loadDraft() ?? [];
   try {
     const value: unknown = JSON.parse(saved);
     return isRecord(value) && isValidPeriods(value.periods) ? value.periods : [];
@@ -133,7 +142,7 @@ export function readCurrentSchedule(): Period[] {
 
 export function loadTemplates(): ScheduleTemplate[] {
   try {
-    const saved = getCookie(TEMPLATES_COOKIE_NAME);
+    const saved = getCookie(TEMPLATES_COOKIE_NAME) ?? getCookie(LEGACY_TEMPLATES_COOKIE_NAME);
     if (!saved) return [];
     const templates: unknown = JSON.parse(saved);
     if (!Array.isArray(templates)) return [];
