@@ -2,7 +2,7 @@
 
 An unofficial campus map for Henry M. Gunn High School. The browser app, Node.js server, map tools, and checks are written in TypeScript. No Python runtime is required.
 
-![Seven-period map editor](output/demo_ui.png)
+![Mobile GunnMap schedule editor](output/demo_ui.png)
 
 ## Run
 
