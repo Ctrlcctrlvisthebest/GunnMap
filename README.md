@@ -44,7 +44,7 @@ The separate Find a Room page supports a room number or familiar aliases such as
 
 ### Responsive and installable use
 
-The navigation links to Schedule Map, Evacuation Routes, Find a Room, and Generated Map. On narrow screens, the GunnMap brand scrolls away while the navigation remains available. Same-tab navigation preserves the brand's current on-screen position, including when a short page has no natural scroll range; scrolling back toward the top reveals it. Page cards share the same border, width, and outer gutter. The assembly-point heading moves above its cards when the available width is limited, and the schedule Building field is hidden at widths up to 430 px to leave room for the room entry. The site includes a web app manifest and install icons for supported browsers.
+The navigation links to Schedule Map, Evacuation Routes, Find a Room, and Generated Map. On narrow screens, the GunnMap brand scrolls away while the navigation remains available. Switching pages preserves the brand's current position: if it is fully visible, partly visible, or hidden, it stays in that state on the next page, including when that page is too short to scroll naturally. Scrolling back toward the top reveals it. Page cards share the same border, width, and outer gutter. The assembly-point heading moves above its cards when the available width is limited, and the schedule Building field is hidden at widths up to 430 px to leave room for the room entry. The site includes a web app manifest and install icons for supported browsers.
 
 ## Map data and maintenance
 
