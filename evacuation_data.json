@@ -358,5 +358,83 @@
         933
       ]
     ]
+  },
+  "provenance": {
+    "sourceFile": "src/map/gunn_evacuation_map.png",
+    "sourceImageSha256": "e8160bb444213a239c0b8e6d73fe5661944a9c93a7af325ee56f5b6ff1583048",
+    "sourceRevisionDate": null,
+    "verifiedOn": null,
+    "imageSize": [
+      1852,
+      1156
+    ]
+  },
+  "groups": {
+    "red": {
+      "title": "Red markings",
+      "color": "#f53622",
+      "destination": "Red assembly area marked beside PREP",
+      "shortDestination": "PREP",
+      "labels": [
+        "H1-H3",
+        "H4-H5",
+        "G1-G3",
+        "G4-G7",
+        "F1-F2",
+        "F4-F6",
+        "PREP"
+      ]
+    },
+    "blue": {
+      "title": "Blue markings",
+      "color": "#304ffe",
+      "destination": "Blue assembly area marked beside Spangenberg Theater and the bike racks",
+      "shortDestination": "Spangenberg Theater / bike racks",
+      "labels": [
+        "M1-M5",
+        "P-105, P-115, P-117",
+        "S-101, S-102, S-121",
+        "S-147"
+      ]
+    },
+    "green": {
+      "title": "Green markings",
+      "color": "#527d32",
+      "destination": "Green assembly area shown below Bow Gym / Titan Gym",
+      "shortDestination": "Bow Gym",
+      "labels": [
+        "K-1-K5",
+        "K6-K13",
+        "L1-L4",
+        "L5-L8",
+        "C-1-C3",
+        "C-4-C8",
+        "E1-E2",
+        "A",
+        "B",
+        "D",
+        "Bow Gym",
+        "Titan Gym"
+      ]
+    },
+    "black": {
+      "title": "Black markings",
+      "color": "#202529",
+      "destination": "Football field",
+      "shortDestination": "Football field",
+      "appendReferenceLabel": true,
+      "description": "These group labels appear on the football field in the image.",
+      "labels": [
+        "J1 - J5",
+        "J6- J10",
+        "N101-N117",
+        "N201-N217"
+      ]
+    }
+  },
+  "inventoryExceptions": {
+    "E1-E2": "The source labels E1-E2; E01 has not been confirmed as either room.",
+    "S147": "S147 is a source-map group label, not an active searchable room.",
+    "TG": "Titan Gym is a reference area without selectable room geometry."
   }
 }

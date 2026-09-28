@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2448" height="1584" viewBox="0 0 2448 1584">
+  <path
+    d="M1387 285 L1531 232"
+    fill="none"
+    stroke="black"
+    stroke-width="2"
+    stroke-dasharray="8 8"
+  />
+  <rect
+    x="1514"
+    y="391"
+    width="67"
+    height="22"
+    fill="white"
+    stroke="black"
+    stroke-width="1"
+  />
+  <text
+    x="1547.5"
+    y="407"
+    text-anchor="middle"
+    font-family="Arial, sans-serif"
+    font-size="15"
+    font-weight="bold"
+    fill="black"
+  >N-BLDG</text>
+</svg>

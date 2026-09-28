@@ -3,8 +3,10 @@
 ## Project layout
 
 - `map_highlighter.ts` is the Sharp renderer for building and room polygons, including color strips for repeated rooms.
-- `web_app.ts` serves the seven-period editor and evacuation page in `web/`, attaches assembly information, and writes unique per-render PNGs plus `output/period_map.png`.
-- `web/app.ts` and `web/evacuation.ts` implement the browser interactions. `tsconfig.web.json` compiles them into ES modules in `dist/web/`; the server serves these compiled files at `/app.js` and `/evacuation.js`.
+- `web_app.ts` serves the React SPA shell and JSON APIs, attaches assembly information, and writes unique per-render PNGs plus `output/period_map.png`.
+- `web/src/app/` contains the React bootstrap, route table, and persistent navigation shell. `web/src/pages/` contains the four route pages; reusable schedule, room, map, and evacuation behavior belongs under `web/src/features/`; shared controls and notifications belong in `web/src/shared/`.
+- `src/domain/room-matching.ts` contains room identity matching shared by the browser and Node server. Keep cross-runtime domain rules outside `web/src/`.
+- `web/index.html` is the shared SPA shell. Vite builds the browser entry from `web/src/app/main.tsx` into `dist/web/main.js` and `dist/web/ui.css`; the server returns the same shell for `/`, `/evacuation`, `/find-room`, and `/generate-map`.
 - `evacuation.ts` and `evacuation_data.json` map explicit source-image groups to rooms. Unlisted rooms remain unconfirmed.
 - `project.ts` loads the inventory and resolves room IDs and aliases.
 - `schedule_preview.ts` renders the example schedule; `build_n_map.ts` rebuilds the working map from the clean page-one PNG and second-floor reference.
@@ -13,12 +15,12 @@
 
 ## Working conventions
 
-- Use Node.js 22 or newer and strict TypeScript for browser, server, rendering, and test code. Install dependencies with `npm ci`; do not reintroduce JavaScript source files or a Python runtime. Generated JavaScript belongs in ignored `dist/`.
+- Use Node.js 22 or newer, React, and strict TypeScript for browser, server, rendering, and test code. Install dependencies with `npm ci`; keep application source in TypeScript/TSX and do not add a Python runtime. Generated JavaScript belongs in ignored `dist/`.
 - Preserve room IDs. Keep `room_index.csv` aligned with inventory changes. The two K6 rooms have distinct IDs and positions.
 - Polygon coordinates refer to the 2448 × 1584 map. Keep PNG legends within those dimensions so interactive room targets remain aligned.
 - Do not overwrite the source PDF or clean page-one PNG when rebuilding the working map.
 - Retain the documented selection scope: V rooms and most athletic spaces are excluded; selectable Bow Gym rooms are BG111, BG138, and BG117.
-- Schedule drafts and templates use cookies. Every schedule edit or load must invalidate outdated clickable targets, and stale async results must not restore them.
+- Schedule drafts and templates use cookies. Every schedule edit or load must invalidate generated map previews, and stale async results must not navigate to an outdated image.
 - Each rendered image has its own URL. Never replace a previous tab's image with another tab's generated map.
 - Keep evacuation assignments grounded in the supplied reference image. Do not infer destinations for unlisted rooms; N214 belongs to the football-field section N201–N217.
 - Put temporary renders in `output/` or a temporary directory; do not commit them unless deliberately named `demo_*.png` for documentation.

@@ -36,25 +36,27 @@ If the curves are decorative artwork, restore them as a CSS background or non-in
 
 Put secondary actions such as **Share Link** and **Saved Schedule** under one **More** disclosure, while leaving the common schedule-editing action visible. This follows the `details` guidance above: disclose only help or controls some users need. Use one shared disclosure-header style and one chevron asset/box size for both **More** and **Saved schedules** so their baselines and hit areas match. The exact icon sizing is an implementation detail rather than something the cited guidance standardizes.
 
-## 2026-09-27 follow-up: GunnWATT image viewer and Preact components
+## 2026-09-27 follow-up: GunnWATT image viewer and component libraries
+
+This section records UI research that began before the React migration. Framework-specific notes have been updated for the current React app; Web Awesome remains the shared control library and Panzoom remains the map gesture library.
 
 ### GunnWATT's real image-map flow
 
 The current [GunnWATT Map page source](https://github.com/GunnWATT/watt/blob/main/client/src/pages/utilities/Map.tsx) places an **Image Map** thumbnail and “Use the mouse to pan and scroll to zoom” caption in an `ImageBox`; clicking it opens a `Dialog` containing `ImageMap`. The [ImageBox source](https://github.com/GunnWATT/watt/blob/main/client/src/components/layout/ImageBox.tsx) confirms the thumbnail is the opener. The [ImageMap source](https://github.com/GunnWATT/watt/blob/main/client/src/components/utilities/ImageMap.tsx) implements a viewport-filling overlay, explicit close action, pointer drag, wheel zoom, and multi-touch zoom/rotation; its touch-only orientation affordance is also present.
 
-**GunnMap recommendation:** make the map thumbnail an obvious “Open map preview” trigger, then give the map the main space in a centered dialog on desktop and a near-full-screen dialog on phones. Keep close, legend, and source note reachable in that viewer. GunnWATT is a useful first-party reference for the *open → large viewer* flow; it hand-writes its gesture logic, so its gestures are not evidence that a custom implementation is preferable. For the pan/zoom behavior, a small framework-agnostic library is a closer fit to GunnMap’s Preact stack (see below).
+**GunnMap recommendation:** make the map thumbnail an obvious “Open map preview” trigger, then give the map the main space in a centered dialog on desktop and a near-full-screen dialog on phones. Keep close, legend, and source note reachable in that viewer. GunnWATT is a useful first-party reference for the *open → large viewer* flow; it hand-writes its gesture logic, so its gestures are not evidence that a custom implementation is preferable. Panzoom remains useful because it works with a React ref and effect without requiring a framework-specific adapter.
 
 ### Reusable pan/zoom for the preview
 
-[Panzoom](https://github.com/timmywil/panzoom) is a vanilla JavaScript library that imports as `@panzoom/panzoom`; its project documentation describes pointer-based panning, pinch zoom on iOS/Android, zoom-to-point and wheel helpers, min/max scale, and `destroy()` cleanup. It does not require a React adapter, so a Preact component can initialize it against a `ref` in an effect and call `destroy()` on cleanup. The repo’s Vite bundler can import the documented ESM entry (`import Panzoom from '@panzoom/panzoom'`). This makes it the recommended candidate for the map gesture layer, with the viewer shell still implemented as a semantic dialog.
+[Panzoom](https://github.com/timmywil/panzoom) is a vanilla JavaScript library that imports as `@panzoom/panzoom`; its project documentation describes pointer-based panning, pinch zoom on iOS/Android, zoom-to-point and wheel helpers, min/max scale, and `destroy()` cleanup. A React component can initialize it against a `ref` in an effect and call `destroy()` on cleanup. The repo’s Vite bundler can import the documented ESM entry (`import Panzoom from '@panzoom/panzoom'`). This makes it the recommended candidate for the map gesture layer, with the viewer shell still implemented as a semantic dialog.
 
 **Verification limit:** Panzoom’s repository claims iOS and touch support, but this research did not physically test GunnMap on an iPhone 17, in Safari, or in an installed web app. Check that opening/closing the modal reinitializes and cleans up correctly, that the map stays bounded, and that pinch/scroll gestures feel right on the target device before shipping.
 
 ### One control library for tooltip, color picker, and select
 
-The repo currently uses Preact `^10.29.8` and Vite `^8.3.1`, with no UI component package; the schedule editor uses native `<select>` and `<input type="color">`. A good fit for a shared visual style is **Web Awesome** (the current docs identify version 3.14.0). Its official catalog includes `<wa-tooltip>`, `<wa-color-picker>`, and `<wa-select>`/`<wa-option>`. Its controls share theme tokens, and component-specific CSS custom properties/`::part()` hooks allow GunnMap to tune details. Tooltips appear on hover and keyboard focus by default and dismiss on Escape; the color picker supports a label, value formats and named swatches; the select is form-compatible and owns its popup/listbox behavior ([Tooltip](https://webawesome.com/docs/components/tooltip/), [Color Picker](https://webawesome.com/docs/components/color-picker/), [Select](https://webawesome.com/docs/components/select/), [Theming](https://webawesome.com/docs/customizing)).
+The schedule editor uses **Web Awesome** for a shared visual style. Its official catalog includes `<wa-tooltip>`, `<wa-color-picker>`, and `<wa-select>`/`<wa-option>`. Its controls share theme tokens, and component-specific CSS custom properties/`::part()` hooks allow GunnMap to tune details. Tooltips appear on hover and keyboard focus by default and dismiss on Escape; the color picker supports a label, value formats and named swatches; the select is form-compatible and owns its popup/listbox behavior ([Tooltip](https://webawesome.com/docs/components/tooltip/), [Color Picker](https://webawesome.com/docs/components/color-picker/), [Select](https://webawesome.com/docs/components/select/), [Theming](https://webawesome.com/docs/customizing)).
 
-Preact’s official guide explicitly supports custom elements in JSX, including their DOM properties and custom events, so these controls do not require React compatibility aliases or a framework migration ([Preact: Web Components](https://preactjs.com/guide/v10/web-components/)). GunnMap does use TypeScript: Preact’s guide shows that custom tag names need declarations added to `preact.JSX.IntrinsicElements`; for component-specific custom events, match the event name exactly or attach them with `addEventListener` through a ref ([Preact: TypeScript custom-element types](https://preactjs.com/guide/v10/typescript/)).
+The controls remain Web Components inside React. GunnMap wraps the select and color picker with React components that synchronize values and listen for their native events through refs. TypeScript custom-element declarations live in `web/src/shared/assets.d.ts`.
 
 **Suggested integration shape** (the docs recommend `dist/` imports for bundlers such as Vite and allow components to be cherry-picked):
 
@@ -63,18 +65,18 @@ npm install @awesome.me/webawesome
 ```
 
 ```ts
-import '@awesome.me/webawesome/dist/styles/themes/default.css';
+import '@awesome.me/webawesome/dist/styles/themes/shoelace.css';
 import '@awesome.me/webawesome/dist/components/tooltip/tooltip.js';
 import '@awesome.me/webawesome/dist/components/color-picker/color-picker.js';
 import '@awesome.me/webawesome/dist/components/select/select.js';
 ```
 
-The select import auto-registers `<wa-option>` and its dependencies. Use the default theme first, then map GunnMap’s existing colors/radii to Web Awesome’s design tokens and use CSS parts only where needed. Do not import its optional `native.css` reset unless intentionally changing global element defaults; the [installation guide](https://webawesome.com/docs/) marks that reset optional and documents cherry-picking component modules.
+The app imports the Shoelace theme, then maps GunnMap’s existing colors/radii to Web Awesome’s design tokens and uses CSS parts only where needed. Do not import its optional `native.css` reset unless intentionally changing global element defaults; the [installation guide](https://webawesome.com/docs/) marks that reset optional and documents cherry-picking component modules.
 
 **Trade-offs:** one package gives all three controls coordinated typography, sizes, popup behavior, and palette hooks without implementing a tooltip or custom picker from scratch. The styling boundary is Shadow DOM, so current GunnMap selectors will not style component internals; theme tokens and documented CSS parts are the supported adjustment points. Web Awesome’s default appearance may need tuning to match GunnMap, and its custom select/color-picker should be checked on iOS home-screen mode before replacing the native controls.
 
-Ark UI also documents tooltip, color-picker, and select components, but its official framework choices are React, Solid, Vue, and Svelte; it does not list Preact. Although this project’s Vite preset can bridge some React libraries, Ark UI compatibility with this Preact app is not established by its docs, so prefer Web Awesome’s native custom-element route here ([Ark UI component docs](https://ark-ui.com/docs/components/tooltip), [Preact Web Components](https://preactjs.com/guide/v10/web-components/)).
+Ark UI also documents tooltip, color-picker, and select components for React, Solid, Vue, and Svelte. GunnMap uses Web Awesome’s native custom elements so it can share controls with the existing web-component setup ([Ark UI component docs](https://ark-ui.com/docs/components/tooltip)).
 
 ### Actionable recommendation
 
-Use Web Awesome for the three editor controls, with one GunnMap-matched theme and only the needed component imports. Keep native controls only where the mobile browser’s native picker is a deliberate UX choice. For image preview, use a large accessible dialog and Panzoom for map movement/zoom, then verify it in the target iPhone 17 installed-web-app environment. The library/framework fit is verified from official documentation; the actual visual match, PWA-device behavior, and theme token values have not yet been checked in GunnMap.
+Use Web Awesome for the three editor controls, with one GunnMap-matched theme and only the needed component imports. Keep native controls only where the mobile browser’s native picker is a deliberate UX choice. For image preview, use a large accessible dialog and Panzoom for map movement/zoom, then verify it in the target iPhone 17 installed-web-app environment. The library integration is implemented; the actual visual match and installed-web-app behavior still need device review.
