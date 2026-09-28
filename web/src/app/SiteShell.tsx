@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import type { MouseEvent } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
+import { OfflineStatus } from "../features/offline/OfflineStatus.js";
 
 const navigation = [
   { to: "/", title: "Schedule Map", icon: "campus" },
@@ -93,7 +94,10 @@ export function SiteShell() {
         ))}
       </nav>
       <div className="app-content">
-        <Outlet />
+        <OfflineStatus />
+        <Suspense fallback={<main id="main-content" className="panel"><p role="status">Loading page…</p></main>}>
+          <Outlet />
+        </Suspense>
         <footer className="site-footer">
           <span>GunnMap <span aria-hidden="true">·</span> Henry M. Gunn High School</span>
           <span>Unofficial student resource</span>
