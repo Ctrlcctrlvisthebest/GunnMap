@@ -14,6 +14,8 @@ import {
   removeSharedSchedule,
   saveCurrentSchedule,
   saveDraft,
+  queueDraft,
+  flushPendingDraft,
   saveTemplates,
   loadSharedPreview,
   saveSharedPreview,
@@ -23,7 +25,6 @@ import type { RoomOption, RoomData } from "../features/rooms/types.js";
 import { buildingName } from "../features/rooms/room-display.js";
 import { findRoomMatches } from "../../../src/domain/room-matching.js";
 import { periodRoomState } from "../features/schedule/room-validation.js";
-import { WebAwesomeSelect } from "../shared/WebAwesomeControls.js";
 import type { CSSVariables } from "../shared/css-types.js";
 import { useToast } from "../shared/toast.js";
 
@@ -87,11 +88,23 @@ export function SchedulePage() {
     removeGeneratedMap();
   }, []);
   useEffect(() => () => { revision.current += 1; }, []);
+  useEffect(() => {
+    const flush = () => { flushPendingDraft(); };
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      flush();
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, []);
 
   const writeSchedule = useCallback((
     next: Period[],
     { preview = sharedPreview, persistDraft = !preview, clearShare = true }: { preview?: boolean; persistDraft?: boolean; clearShare?: boolean } = {},
   ) => {
+    flushPendingDraft();
     const normalized = PERIOD_COLORS.map((fallbackColor, index) => {
       const period = next[index];
       let building = period?.building && buildings.includes(period.building)
@@ -129,7 +142,7 @@ export function SchedulePage() {
 
   useEffect(() => {
     let current = true;
-    void fetch("/api/rooms")
+    void fetch("/api/rooms", { credentials: "omit" })
       .then(async response => {
         if (!response.ok) throw new Error("Could not load the room list.");
         return await response.json() as RoomData;
@@ -192,7 +205,7 @@ export function SchedulePage() {
     setRedoHistory([]);
     setPeriods(next);
     saveCurrentSchedule(next);
-    if (!sharedPreview && !saveDraft(next)) showToast("Draft could not be saved in this browser.");
+    if (!sharedPreview) queueDraft(next, () => showToast("Draft could not be saved in this browser."));
     saveSharedPreview(sharedPreview ? next : null);
     setValidationMessage("");
     invalidatePreview();
@@ -254,6 +267,7 @@ export function SchedulePage() {
   };
 
   const share = async () => {
+    flushPendingDraft();
     setMoreOpen(false);
     const encoded = encodeURIComponent(JSON.stringify(periods));
     const shareUrl = `${window.location.origin}/#schedule=${encoded}`;
@@ -268,6 +282,7 @@ export function SchedulePage() {
 
   const saveTemplate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    flushPendingDraft();
     const name = templateName.trim().slice(0, 60);
     if (!name) {
       setTemplateMessage("Enter a name for this schedule.");
@@ -360,6 +375,7 @@ export function SchedulePage() {
   };
 
   const generateMap = async () => {
+    flushPendingDraft();
     if (!roomsLoaded) return;
     if (activeRender.current?.revision === revision.current) {
       return activeRender.current.promise;
@@ -382,6 +398,7 @@ export function SchedulePage() {
         try {
           const response = await fetch("/api/render", {
             method: "POST",
+            credentials: "omit",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ periods: periods.map(period => ({
               ...period,
@@ -490,19 +507,19 @@ export function SchedulePage() {
                       <label htmlFor="template-select">
                         Choose a saved schedule
                       </label>
-                      <WebAwesomeSelect
-                        ariaLabel="Saved schedules"
-                        placeholder="Choose a saved schedule"
+                      <select
+                        id="template-select"
+                        aria-label="Saved schedules"
                         value={selectedTemplate}
-                        onValueChange={loadTemplate}
+                        onChange={event => loadTemplate(event.currentTarget.value)}
                       >
-                        <wa-option value="">Choose a saved schedule</wa-option>
+                        <option value="">Choose a saved schedule</option>
                         {templates.map(template => (
-                          <wa-option value={template.name} key={template.name}>
+                          <option value={template.name} key={template.name}>
                             {template.name}
-                          </wa-option>
+                          </option>
                         ))}
-                      </WebAwesomeSelect>
+                      </select>
                       <button
                         className="text-button"
                         type="button"

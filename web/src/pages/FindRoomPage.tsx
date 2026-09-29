@@ -35,7 +35,7 @@ export function FindRoomPage() {
 
   useEffect(() => {
     let current = true;
-    void fetch("/api/rooms")
+    void fetch("/api/rooms", { credentials: "omit" })
       .then(async response => {
         if (!response.ok) throw new Error();
         return await response.json() as RoomData;
@@ -81,7 +81,7 @@ export function FindRoomPage() {
     setSearching(true);
     setMessage("Searching…");
     try {
-      const response = await fetch(`/api/room-lookup?q=${encodeURIComponent(query)}`);
+      const response = await fetch(`/api/room-lookup?q=${encodeURIComponent(query)}`, { credentials: "omit" });
       const result = await response.json() as RoomLookupResponse;
       if (currentRevision !== requestRevision.current) return;
       if (!response.ok) throw new Error(result.error ?? "Room search failed.");
@@ -223,6 +223,13 @@ export function FindRoomPage() {
                 className="download-link"
                 href="/map.png"
                 download="gunn-campus-map.png"
+                onClick={event => {
+                  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  void import("../features/maps/download-public-map.js")
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/map.webp", "gunn-campus-map.png"))
+                    .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
+                }}
               >
                 Download PNG
               </a>
@@ -246,7 +253,7 @@ export function FindRoomPage() {
               <div ref={art} className="room-locator-art">
                 <img
                   ref={image}
-                  src="/map.png"
+                  src="/map.webp"
                   alt={`Gunn campus map with ${selectedRoom.label} highlighted`}
                 />
                 <span

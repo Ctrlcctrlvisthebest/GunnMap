@@ -9,6 +9,7 @@ import type {
 } from "../features/evacuation/types.js";
 import type { CSSVariables } from "../shared/css-types.js";
 import { useToast } from "../shared/toast.js";
+import "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 
 type EntryWithMarker = ScheduleEvacuationEntry & {
   marker: [number, number];
@@ -136,7 +137,7 @@ export function EvacuationPage() {
   useEffect(() => {
     let current = true;
 
-    void fetch("/api/evacuation-data")
+    void fetch("/api/evacuation-data", { credentials: "omit" })
       .then(async response => {
         if (!response.ok) throw new Error("Evacuation data is unavailable.");
         return await response.json() as EvacuationOverview;
@@ -165,7 +166,7 @@ export function EvacuationPage() {
     void Promise.all(selected.map(async period => {
       try {
         const query = encodeURIComponent(period.room);
-        const response = await fetch(`/api/room-lookup?q=${query}`);
+        const response = await fetch(`/api/room-lookup?q=${query}`, { credentials: "omit" });
         if (!response.ok) throw new Error("Room lookup failed");
 
         const result = await response.json() as ScheduleLookupResponse;
@@ -282,6 +283,13 @@ export function EvacuationPage() {
                 className="download-link"
                 href="/evacuation-map.png"
                 download="gunn-evacuation-map.png"
+                onClick={event => {
+                  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  void import("../features/maps/download-public-map.js")
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/evacuation-map.webp", "gunn-evacuation-map.png"))
+                    .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
+                }}
               >
                 Download PNG
               </a>
@@ -297,7 +305,7 @@ export function EvacuationPage() {
             >
               <span className="evacuation-map-art">
                 <img
-                  src="/evacuation-map.png"
+                src="/evacuation-map.webp"
                   alt="Gunn campus evacuation reference map. Open the map to zoom and pan."
                 />
               </span>
@@ -463,7 +471,7 @@ export function EvacuationPage() {
           <div ref={viewerArt} className="evacuation-map-art">
             <img
               ref={viewerImage}
-              src="/evacuation-map.png"
+              src="/evacuation-map.webp"
               alt="Gunn campus evacuation reference map with room group labels and marked routes."
             />
             {markerEntries.length > 0 && (
