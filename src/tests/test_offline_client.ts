@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { generatedImagePath, isValidPng, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER } from './web/offline/policy.js';
-import { removeOfflineMap, savedOfflineMap, saveMapOffline } from './web/src/features/offline/offline-client.js';
+import { generatedImagePath, isValidPng, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER } from '../../web/offline/policy.js';
+import { removeOfflineMap, savedOfflineMap, saveMapOffline } from '../../web/src/features/offline/offline-client.js';
 
 const origin = 'https://gunnmap.test';
 const first = `/output/period_map_${'a'.repeat(32)}.png`;

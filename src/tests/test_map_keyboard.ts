@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { handleMapKeydown, type KeyboardMapInstance } from './web/src/features/maps/map-keyboard.js';
+import { handleMapKeydown, type KeyboardMapInstance } from '../../web/src/features/maps/map-keyboard.js';
 
 function harness(scale = 2) {
   const viewport = new EventTarget();

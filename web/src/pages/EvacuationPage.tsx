@@ -55,6 +55,9 @@ function sourceProvenance(overview: EvacuationOverview) {
     ?? "not shown on the supplied image";
   const verified = overview.provenance.verifiedOn ?? "not recorded";
 
+  if (overview.provenance.sourceKind === "official_site_map") {
+    return `School site map: ${sourceName}. Map revision date: ${revision}. Evacuation routes and assembly points have not been verified.`;
+  }
   return `User-supplied reference: ${sourceName}. Reference revision date: ${revision}. Verification date: ${verified}.`;
 }
 
@@ -253,7 +256,9 @@ export function EvacuationPage() {
   const validationMessage = overview
     ? overview.validationIssues.length
       ? `Data check needs review: ${overview.validationIssues.join(" ")}`
-      : "Reference data is internally consistent. This does not confirm current school instructions."
+      : overview.routesAvailable
+        ? "Reference data is internally consistent. This does not confirm current school instructions."
+        : "The current site map has no verified evacuation routes or assembly points."
     : "Evacuation data could not be checked.";
   const validationClassName = overview?.validationIssues.length
     ? "is-error"
@@ -268,11 +273,11 @@ export function EvacuationPage() {
         >
           <div className="panel-heading">
             <div className="evacuation-title-group">
-              <h1 id="evacuation-title">Campus Evacuation Map</h1>
+              <h1 id="evacuation-title">Campus Map & Evacuation Status</h1>
               <button
                 className="map-info-button"
                 type="button"
-                aria-label="Read the map legend and reference notes"
+                aria-label="Read the map source and evacuation status"
                 onClick={() => infoDialog.current?.showModal()}
               >
                 i
@@ -282,12 +287,12 @@ export function EvacuationPage() {
               <a
                 className="download-link"
                 href="/evacuation-map.png"
-                download="gunn-evacuation-map.png"
+                download="gunn-campus-map-2026.png"
                 onClick={event => {
                   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   void import("../features/maps/download-public-map.js")
-                    .then(({ downloadPublicMap }) => downloadPublicMap("/evacuation-map.webp", "gunn-evacuation-map.png"))
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/evacuation-map.webp", "gunn-campus-map-2026.png"))
                     .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
                 }}
               >
@@ -296,17 +301,22 @@ export function EvacuationPage() {
             </div>
           </div>
 
+          <p className="map-help" role="status">
+            This September 3, 2026 school site map has no evacuation routes or assembly points.
+            Room assembly assignments are unconfirmed. Follow current school staff directions during an emergency.
+          </p>
+
           <div className="evacuation-map-frame">
             <button
               className="evacuation-map-open"
               type="button"
-              aria-label="Open interactive evacuation map"
+              aria-label="Open interactive campus map"
               onClick={openViewer}
             >
               <span className="evacuation-map-art">
                 <img
                 src="/evacuation-map.webp"
-                  alt="Gunn campus evacuation reference map. Open the map to zoom and pan."
+                  alt="Gunn school site map dated September 3, 2026, without evacuation routes. Open the map to zoom and pan."
                 />
               </span>
             </button>
@@ -314,7 +324,7 @@ export function EvacuationPage() {
               <span
                 className="evacuation-schedule-overlays"
                 role="group"
-                aria-label="Your schedule rooms on the evacuation map"
+                aria-label="Your schedule rooms on the campus map"
               >
                 <ScheduleMarkers
                   entries={markerEntries}
@@ -333,7 +343,7 @@ export function EvacuationPage() {
             >
               <div>
                 <h2 id="schedule-evacuation-title">
-                  Your schedule's assembly points
+                  Your schedule's assembly status
                 </h2>
                 <p className="map-help">
                   Based on the rooms saved on this device.
@@ -383,7 +393,7 @@ export function EvacuationPage() {
         <div className="panel-heading">
           <div>
             <div className="eyebrow">READ THE MAP</div>
-            <h2 id="route-groups-title">Room Groups by Color</h2>
+            <h2 id="route-groups-title">Evacuation Route Status</h2>
           </div>
           <button
             className="dialog-close"
@@ -395,7 +405,7 @@ export function EvacuationPage() {
           </button>
         </div>
         <div className="route-groups" aria-live="polite">
-          {overview && Object.entries(overview.groups).map(([key, group]) => {
+          {overview?.routesAvailable && Object.entries(overview.groups).map(([key, group]) => {
             const style = { "--route-color": group.color } as CSSVariables;
 
             return (
@@ -411,6 +421,7 @@ export function EvacuationPage() {
               </article>
             );
           })}
+          {overview && !overview.routesAvailable && <p>No verified route groups are available for the current campus layout.</p>}
         </div>
         <div className="map-reference-notes" role="note">
           <p>
@@ -428,7 +439,7 @@ export function EvacuationPage() {
               ? Object.values(overview.inventoryExceptions).join(" ")
               : ""}
           </p>
-          <p>Unlisted rooms have no assigned route.</p>
+          <p>{overview?.routesAvailable ? "Unlisted rooms have no assigned route." : "No room has a confirmed assembly assignment in this map."}</p>
         </div>
       </dialog>
 
@@ -442,7 +453,7 @@ export function EvacuationPage() {
         }}
       >
         <div className="panel-heading">
-          <h2 id="evacuation-viewer-title">Campus Evacuation Map</h2>
+          <h2 id="evacuation-viewer-title">Campus Map</h2>
           <button
             className="dialog-close"
             type="button"
@@ -452,9 +463,9 @@ export function EvacuationPage() {
             ×
           </button>
         </div>
-        <div className="map-controls" role="group" aria-label="Evacuation map controls">
-          <button className="download-link" type="button" onClick={mapControls.zoomIn} aria-label="Zoom in on evacuation map">Zoom in</button>
-          <button className="download-link" type="button" onClick={mapControls.zoomOut} aria-label="Zoom out on evacuation map">Zoom out</button>
+        <div className="map-controls" role="group" aria-label="Campus map controls">
+          <button className="download-link" type="button" onClick={mapControls.zoomIn} aria-label="Zoom in on campus map">Zoom in</button>
+          <button className="download-link" type="button" onClick={mapControls.zoomOut} aria-label="Zoom out on campus map">Zoom out</button>
           <button className="download-link" type="button" onClick={mapControls.reset}>Reset map</button>
         </div>
         <p className="map-viewer-help" id="evacuation-map-help">
@@ -464,7 +475,7 @@ export function EvacuationPage() {
           ref={viewerStage}
           className="evacuation-map-stage"
           role="region"
-          aria-label="Interactive evacuation map"
+          aria-label="Interactive campus map"
           aria-describedby="evacuation-map-help"
           tabIndex={0}
         >
@@ -472,13 +483,13 @@ export function EvacuationPage() {
             <img
               ref={viewerImage}
               src="/evacuation-map.webp"
-              alt="Gunn campus evacuation reference map with room group labels and marked routes."
+              alt="Gunn school site map dated September 3, 2026, without evacuation routes."
             />
             {markerEntries.length > 0 && (
               <span
                 className="evacuation-schedule-overlays"
                 role="group"
-                aria-label="Your schedule rooms on the evacuation map"
+                aria-label="Your schedule rooms on the campus map"
               >
                 <ScheduleMarkers
                   entries={markerEntries}

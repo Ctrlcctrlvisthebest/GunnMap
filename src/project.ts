@@ -1,11 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findRoomMatches, normalizeRoomInput } from './src/domain/room-matching.js';
+import { findRoomMatches, normalizeRoomInput } from './domain/room-matching.js';
 const here = dirname(fileURLToPath(import.meta.url));
-export const ROOT = existsSync(resolve(here, 'room_regions.json')) ? here : resolve(here, '..');
+export const ROOT = existsSync(resolve(here, 'data/room_regions.json'))
+  ? resolve(here, '..')
+  : resolve(here, '../..');
 export function readJson<T>(name: string): T {
-  return JSON.parse(readFileSync(resolve(ROOT, name), 'utf8')) as T;
+  return JSON.parse(readFileSync(resolve(ROOT, 'src/data', name), 'utf8')) as T;
 }
 export type Point = [number, number];
 export interface Room {

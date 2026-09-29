@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createApp, type AppOptions } from './web_app.js';
-import { GeneratedMapStore } from './generated_map_store.js';
-import { PublicResponseCache } from './http_cache.js';
-import { HttpError, RenderQueue, RenderRateLimiter } from './server_policy.js';
+import { createApp, type AppOptions } from '../web_app.js';
+import { GeneratedMapStore } from '../generated_map_store.js';
+import { PublicResponseCache } from '../http_cache.js';
+import { HttpError, RenderQueue, RenderRateLimiter } from '../server_policy.js';
 
 async function withApp(run: (base: string, dir: string) => Promise<void>, options?: AppOptions) {
   const dir = await mkdtemp(join(tmpdir(), 'gunnmap-security-'));

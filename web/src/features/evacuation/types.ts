@@ -11,7 +11,7 @@ export interface EvacuationGroupInfo {
 
 export interface EvacuationOverview {
   provenance: {
-    sourceKind: "supplied_reference";
+    sourceKind: "supplied_reference" | "official_site_map";
     originalFilename: string;
     sourceFile: string;
     sourceImageSha256: string;
@@ -19,6 +19,7 @@ export interface EvacuationOverview {
     verifiedOn: string | null;
     imageSize: [number, number];
   };
+  routesAvailable: boolean;
   groups: Record<string, EvacuationGroupInfo>;
   inventoryExceptions: Record<string, string>;
   validationIssues: string[];

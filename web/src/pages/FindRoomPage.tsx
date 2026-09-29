@@ -31,7 +31,7 @@ export function FindRoomPage() {
         scale: 2,
       }
     : undefined;
-  const controls = usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus });
+  const controls = usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus, animateFocus: true });
 
   useEffect(() => {
     let current = true;

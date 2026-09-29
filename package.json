@@ -7,19 +7,19 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "npm run build:web && node --import tsx web_app.ts",
-    "build:web": "tsc --noEmit -p tsconfig.web.json && tsc -p tsconfig.worker.json && vite build && node --import tsx build_map_assets.ts && node --import tsx build_offline.ts",
+    "dev": "npm run build:web && node --import tsx src/web_app.ts",
+    "build:web": "tsc --noEmit -p tsconfig.web.json && tsc -p tsconfig.worker.json && vite build && node --import tsx src/build_map_assets.ts && node --import tsx src/build_offline.ts",
     "prebuild": "npm run data:validate",
     "build": "tsc && npm run build:web",
-    "start": "node dist/web_app.js",
+    "start": "node dist/src/web_app.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.worker.json",
-    "test": "npm run build:web && tsx --tsconfig tsconfig.web.json --test test_*.ts",
-    "highlight": "node --import tsx map_cli.ts",
-    "map:index": "node --import tsx map_cli.ts --index",
-    "map:rebuild": "node --import tsx build_n_map.ts",
-    "map:preview": "node --import tsx schedule_preview.ts",
-    "map:validate": "node --import tsx n_floor_validation.ts",
-    "data:validate": "node --import tsx validate_map_data.ts"
+    "test": "npm run build:web && tsx --tsconfig tsconfig.web.json --test src/tests/test_*.ts",
+    "highlight": "node --import tsx src/map_cli.ts",
+    "map:index": "node --import tsx src/map_cli.ts --index",
+    "map:rebuild": "node --import tsx src/build_n_map.ts",
+    "map:preview": "node --import tsx src/schedule_preview.ts",
+    "map:validate": "node --import tsx src/n_floor_validation.ts",
+    "data:validate": "node --import tsx src/validate_map_data.ts"
   },
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",

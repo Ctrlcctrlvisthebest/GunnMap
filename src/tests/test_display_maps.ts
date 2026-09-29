@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
-import { ROOT } from './project.js';
+import { ROOT } from '../project.js';
 
 test('lossless display maps preserve every source pixel and map coordinate', async () => {
   for (const [source, display] of [

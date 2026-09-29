@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
 import { act, createElement } from "react";
-import { rooms as inventory, buildings } from "./project.js";
-import type { Period, ScheduleTemplate } from "./web/src/features/schedule/types.js";
+import { rooms as inventory, buildings } from "../project.js";
+import type { Period, ScheduleTemplate } from "../../web/src/features/schedule/types.js";
 
 // Mount the shipped React components and autocomplete implementation. Only
 // browser primitives missing in jsdom and external I/O are substituted.
@@ -22,9 +22,9 @@ dom.window.HTMLDialogElement.prototype.close = function () {
 
 const { createRoot } = await import("react-dom/client");
 const { MemoryRouter, Routes, Route, useNavigate } = await import("react-router-dom");
-const { SchedulePage } = await import("./web/src/pages/SchedulePage.js");
-const { ToastProvider } = await import("./web/src/shared/toast.js");
-const storage = await import("./web/src/features/schedule/schedule-storage.js");
+const { SchedulePage } = await import("../../web/src/pages/SchedulePage.js");
+const { ToastProvider } = await import("../../web/src/shared/toast.js");
+const storage = await import("../../web/src/features/schedule/schedule-storage.js");
 
 const blank = () => storage.defaultPeriods();
 const schedule = (room: string): Period[] => {
@@ -191,23 +191,24 @@ test("failed explicit save keeps a shared schedule in preview mode", async () =>
   } finally { await h.close(); }
 });
 
-test("real React rows recognize aliases, keep K6 ambiguous, and focus errors before a request", async () => {
+test("real React rows resolve merged K5 and the remaining K6, and focus invalid rooms", async () => {
   const h = await harness();
   try {
     await h.input("n – 2 14");
     assert.match(h.get("#period-1-feedback").textContent!, /Found N214/);
     await h.input("library", 2);
     assert.match(h.get("#period-2-feedback").textContent!, /D-LIB/);
+    await h.input("K6 (upper map location)", 3);
+    assert.match(h.get("#period-3-feedback").textContent!, /Found K5/);
     await h.input("K6", 3);
+    assert.match(h.get("#period-3-feedback").textContent!, /Found K6/);
     await h.input("N999", 5);
     await h.submit();
     assert.equal(h.requests.length, 0);
-    assert.match(h.get(".schedule-validation-message").textContent!, /periods 3, 5/);
-    assert.equal(document.activeElement?.id, "period-3-room");
-    assert.equal(h.get("#period-3-room").getAttribute("aria-invalid"), "true");
-    assert.equal(h.get("#period-3-room").getAttribute("aria-describedby"), "period-3-feedback");
-    await h.click("K6 (lower map location)");
-    assert.equal(h.get("#period-3-room").getAttribute("aria-invalid"), "false");
+    assert.match(h.get(".schedule-validation-message").textContent!, /period 5/);
+    assert.equal(document.activeElement?.id, "period-5-room");
+    assert.equal(h.get("#period-5-room").getAttribute("aria-invalid"), "true");
+    assert.equal(h.get("#period-5-room").getAttribute("aria-describedby"), "period-5-feedback");
     await h.input("", 5);
     await h.submit();
     assert.equal(h.requests.length, 1);
@@ -350,6 +351,12 @@ test("the actual autocomplete accepts normalized input and selecting a suggestio
     });
     assert.equal(h.get<HTMLInputElement>("#period-1-room").value, "");
     assert.equal(storage.loadDraft()![0].room, "", "Escape must clear React state as well as the visible input");
+    await h.input("K6");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+    const k6Suggestions = [...document.querySelectorAll("#period-1-room-suggestions li")];
+    assert.equal(k6Suggestions.length, 1);
+    assert.match(k6Suggestions[0].textContent!, /K6/);
+    assert.doesNotMatch(k6Suggestions[0].textContent!, /upper map location/i);
   } finally { await h.close(); }
 });
 
@@ -448,7 +455,7 @@ test("one on-demand color dialog edits the selected period without submitting th
     assert.equal(document.querySelectorAll('.color-editor').length, 0);
     assert.equal(document.querySelectorAll('.period-color-trigger').length, 7);
     await h.clickLabel("Period 2 color");
-    await act(async () => { await import("./web/src/features/schedule/ColorEditor.js"); await tick(); });
+    await act(async () => { await import("../../web/src/features/schedule/ColorEditor.js"); await tick(); });
     const dialog = document.querySelector<HTMLDialogElement>('.color-editor');
     assert.ok(dialog?.open);
     assert.equal(dialog.closest('form'), null, "the modal must not nest a form inside the schedule form");
