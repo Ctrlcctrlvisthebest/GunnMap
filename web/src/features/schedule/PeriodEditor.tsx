@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { CSSVariables } from "../../shared/css-types.js";
 import { findRoomMatches } from "../../../../src/domain/room-matching.js";
 import { RoomInput } from "../rooms/RoomInput.js";
 import { buildingName, roomLocationLabel } from "../rooms/room-display.js";
 import { periodRoomState } from "./room-validation.js";
-import { WebAwesomeColorPicker, WebAwesomeSelect } from "../../shared/WebAwesomeControls.js";
 import { PERIOD_COLORS } from "./schedule-storage.js";
 import type { Period } from "./types.js";
 import type { RoomOption } from "../rooms/types.js";
+
+const ColorEditor = lazy(() => import("./ColorEditor.js"));
 
 interface PeriodEditorProps {
   periods: Period[];
@@ -24,6 +25,16 @@ export function PeriodEditor({
   disabled = false,
   onChange,
 }: PeriodEditorProps) {
+  const [wide, setWide] = useState(() => window.matchMedia?.("(min-width: 431px)").matches ?? true);
+  const [manualBuildings, setManualBuildings] = useState(false);
+  const [editingColor, setEditingColor] = useState<number | null>(null);
+  const colorTrigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const query = window.matchMedia?.("(min-width: 431px)");
+    const changed = () => setWide(query?.matches ?? true);
+    query?.addEventListener("change", changed);
+    return () => query?.removeEventListener("change", changed);
+  }, []);
   const [autoBuildings, setAutoBuildings] = useState<string[]>(() => periods.map((period) => {
     const matches = findRoomMatches(rooms, period.room);
     const candidates = [...new Set(matches.map((room) => room.building))];
@@ -68,6 +79,10 @@ export function PeriodEditor({
 
   return (
     <div className="period-list">
+      {!wide && <button type="button" className="text-button manual-building-toggle"
+        aria-expanded={manualBuildings} onClick={() => setManualBuildings(open => !open)}>
+        {manualBuildings ? "Hide building choices" : "Choose buildings manually"}
+      </button>}
       {periods.map((period, index) => {
         const number = index + 1;
         const { matches, state, invalid } = periodRoomState(period, rooms);
@@ -106,27 +121,28 @@ export function PeriodEditor({
                 onValueChange={value => updateRoom(index, value)}
               />
             </label>
-            <label className="field field-building">
+            {(wide || manualBuildings) && <label className={`field field-building${!wide ? " is-manual" : ""}`}>
               <span>Building</span>
-              <WebAwesomeSelect
-                ariaLabel={`Period ${number} building`}
+              <select
+                aria-label={`Period ${number} building`}
                 value={period.building}
                 disabled={disabled}
-                onValueChange={value => {
+                onChange={event => {
+                  const value = event.currentTarget.value;
                   update(index, (current, nextAuto) => {
                     current.building = value;
                     nextAuto[index] = "";
                   });
                 }}
               >
-                <wa-option value="">Auto-detect</wa-option>
+                <option value="">Auto-detect</option>
                 {buildings.map(building => (
-                  <wa-option value={building} key={building}>
+                  <option value={building} key={building}>
                     {buildingName(building)}
-                  </wa-option>
+                  </option>
                 ))}
-              </WebAwesomeSelect>
-            </label>
+              </select>
+            </label>}
             <p className="period-room-feedback" id={`period-${number}-feedback`} aria-live="polite">
               {disabled ? "Loading room list…" : feedback}
             </p>
@@ -140,23 +156,27 @@ export function PeriodEditor({
                 ))}
               </div>
             )}
-            <label className="field field-color">
+            <div className="field field-color">
               <span>Color</span>
-              <WebAwesomeColorPicker
-                ariaLabel={`Period ${number} color`}
-                value={period.color}
-                swatches={PERIOD_COLORS}
+              <button type="button" className="period-color-trigger"
+                aria-label={`Period ${number} color`}
+                aria-haspopup="dialog"
+                style={{ "--swatch-color": period.color } as CSSVariables}
                 disabled={disabled}
-                onValueChange={value => {
-                  update(index, current => {
-                    current.color = value;
-                  });
+                onClick={event => {
+                  colorTrigger.current = event.currentTarget;
+                  setEditingColor(index);
                 }}
               />
-            </label>
+            </div>
           </div>
         );
       })}
+      {editingColor !== null && <Suspense fallback={<p role="status">Opening color editor…</p>}>
+        <ColorEditor period={editingColor + 1} value={periods[editingColor].color} swatches={PERIOD_COLORS}
+          onApply={color => update(editingColor, current => { current.color = color; })}
+          onClose={() => { setEditingColor(null); colorTrigger.current?.focus(); }} />
+      </Suspense>}
     </div>
   );
 }

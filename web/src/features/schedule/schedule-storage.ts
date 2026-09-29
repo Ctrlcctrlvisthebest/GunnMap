@@ -19,6 +19,29 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 let currentScheduleInMemory: Period[] | null = null;
 let sharedPreviewInMemory: Period[] | null = null;
 const copyPeriods = (periods: Period[]) => periods.map(period => ({ ...period }));
+let pendingDraft: { periods: Period[]; onFailure(): void } | null = null;
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelPendingDraft() {
+  clearTimeout(draftTimer);
+  draftTimer = undefined;
+  pendingDraft = null;
+}
+
+/** Keep the current draft synchronous in memory; coalesce cookie writes while typing. */
+export function queueDraft(periods: Period[], onFailure: () => void) {
+  clearTimeout(draftTimer);
+  pendingDraft = { periods: copyPeriods(periods), onFailure };
+  draftTimer = setTimeout(flushPendingDraft, 250);
+}
+
+export function flushPendingDraft(): boolean {
+  if (!pendingDraft) return true;
+  const draft = pendingDraft;
+  const saved = saveDraft(draft.periods);
+  if (!saved) draft.onFailure();
+  return saved;
+}
 
 interface ScheduleDraft {
   version: 1;
@@ -63,11 +86,13 @@ function getCookie(name: string) {
 function setCookie(name: string, value: string) {
   const cookieName = encodeURIComponent(name);
   const cookieValue = encodeURIComponent(value);
-  document.cookie = `${cookieName}=${cookieValue}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${cookieName}=${cookieValue}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax${secure}`;
   return getCookie(name) === value;
 }
 
 export function loadDraft(): Period[] | null {
+  if (pendingDraft) return copyPeriods(pendingDraft.periods);
   try {
     const saved = getCookie(DRAFT_COOKIE_NAME) ?? getCookie(LEGACY_DRAFT_COOKIE_NAME);
     if (!saved) return null;
@@ -82,6 +107,7 @@ export function loadDraft(): Period[] | null {
 }
 
 export function saveDraft(periods: Period[]) {
+  cancelPendingDraft();
   try {
     return setCookie(DRAFT_COOKIE_NAME, JSON.stringify({ version: 1, periods }));
   } catch {
@@ -90,6 +116,7 @@ export function saveDraft(periods: Period[]) {
 }
 
 export function clearDraft() {
+  cancelPendingDraft();
   try {
     // An explicit empty v2 draft prevents the legacy draft from reappearing.
     return setCookie(DRAFT_COOKIE_NAME, "null");
