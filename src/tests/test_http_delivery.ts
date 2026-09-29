@@ -8,9 +8,9 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { gunzipSync } from 'node:zlib';
-import { createApp, type AppOptions } from './web_app.js';
-import { evacuationForRoom, evacuationOverview } from './evacuation.js';
-import { rooms, roomData, ROOT } from './project.js';
+import { createApp, type AppOptions } from '../web_app.js';
+import { evacuationForRoom, evacuationOverview } from '../evacuation.js';
+import { rooms, roomData, ROOT } from '../project.js';
 
 interface Response { status: number; headers: IncomingHttpHeaders; body: Buffer }
 function request(url: string, headers: Record<string, string> = {}): Promise<Response> {
@@ -139,13 +139,14 @@ test('room lookup and offline inventory preserve the React SPA API contracts', a
       assert.equal(result.rooms.length, 1);
       assert.equal(result.rooms[0].id, 'R148');
       assert.equal(result.rooms[0].floor, 2);
-      assert.equal(result.rooms[0].evacuation.group, 'black');
+      assert.equal(result.rooms[0].evacuation.group, null);
       assert.deepEqual(result.map_size, roomData.image_size);
       assert.deepEqual(result.rooms[0], offline.rooms.find((room: { id: string }) => room.id === 'R148'));
     }
-    const duplicate = JSON.parse((await request(base + '/api/room-lookup?q=K6')).body.toString());
-    assert.equal(duplicate.rooms.length, 2);
-    for (const room of duplicate.rooms) assert.ok(room.aliases.some((alias: string) => alias.includes('map location')));
+    const k6 = JSON.parse((await request(base + '/api/room-lookup?q=K6')).body.toString());
+    assert.deepEqual(k6.rooms.map((room: {id: string}) => room.id), ['R070']);
+    const merged = JSON.parse((await request(base + '/api/room-lookup?q=R069')).body.toString());
+    assert.deepEqual(merged.rooms.map((room: {id: string}) => room.id), ['R068']);
     const alias = JSON.parse((await request(base + '/api/room-lookup?q=library')).body.toString());
     assert.equal(alias.rooms[0].label, 'D-LIB');
     const unconfirmed = JSON.parse((await request(base + '/api/room-lookup?q=E01')).body.toString());

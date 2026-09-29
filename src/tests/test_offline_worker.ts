@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { rooms, roomData, ROOT } from './project.js';
-import { evacuationForRoom } from './evacuation.js';
-import { findRoomMatches } from './src/domain/room-matching.js';
-import { NETWORK_GET_TIMEOUT_MS, PERSONAL_CACHE, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER, PUBLIC_CACHE_PREFIX, PUBLIC_MANIFEST_KEY, UNSAVED_IMAGE_TIMEOUT_MS } from './web/offline/policy.js';
+import { rooms, roomData, ROOT } from '../project.js';
+import { evacuationForRoom } from '../evacuation.js';
+import { findRoomMatches } from '../domain/room-matching.js';
+import { NETWORK_GET_TIMEOUT_MS, PERSONAL_CACHE, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER, PUBLIC_CACHE_PREFIX, PUBLIC_MANIFEST_KEY, UNSAVED_IMAGE_TIMEOUT_MS } from '../../web/offline/policy.js';
 
 const origin = 'https://gunnmap.test';
 const shell = '<!doctype html><div id="root">installed app shell</div>';
@@ -241,9 +241,9 @@ test('offline navigation, public assets and room lookup preserve geometry and ev
       assert.equal(result.rooms[0].floor, 2);
       assert.ok(result.rooms[0].polygon.length >= 3);
       assert.equal(result.rooms[0].marker.length, 2);
-      assert.equal(result.rooms[0].evacuation.group, 'black');
+      assert.equal(result.rooms[0].evacuation.group, null);
     }
-    if (query === 'K6') assert.equal(result.rooms.length, 2);
+    if (query === 'K6') assert.deepEqual(result.rooms.map((room: {id: string}) => room.id), ['R070']);
     if (query === 'E01') assert.equal(result.rooms[0].evacuation.status, 'unconfirmed');
   }
   assert.equal((await h.fetch('/api/room-lookup?q=%20')).status, 400);
@@ -329,7 +329,7 @@ test('broken offline directories return 503, are discarded, and recover when a l
     h.offline();
     const recovered = await h.fetch('/api/room-lookup?q=N214');
     assert.equal(recovered.status, 200);
-    assert.equal((await recovered.json()).rooms[0].evacuation.group, 'black');
+    assert.equal((await recovered.json()).rooms[0].evacuation.group, null);
   }
 });
 

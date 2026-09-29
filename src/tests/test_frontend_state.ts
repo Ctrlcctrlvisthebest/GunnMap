@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ROOT, rooms } from "./project.js";
-import { findRoomMatches, normalizeRoomInput, roomMatchesInput } from "./src/domain/room-matching.js";
-import { setBoundedImageTransform } from "./web/src/features/maps/map-pan-bounds.js";
+import { ROOT, rooms } from "../project.js";
+import { findRoomMatches, normalizeRoomInput, roomMatchesInput } from "../domain/room-matching.js";
+import { setBoundedImageTransform } from "../../web/src/features/maps/map-pan-bounds.js";
 
 test("map panning is clamped to the image edges at its current zoom", () => {
   const originalWindow = globalThis.window;
@@ -34,11 +34,15 @@ test("room matching normalizes case, spaces, and hyphens while retaining aliases
     assert.equal(roomMatchesInput(n214, value), true, value);
   }
   const k6 = rooms.filter(room => roomMatchesInput(room, "K6"));
-  assert.equal(k6.length, 2, "the two K6 rooms remain ambiguous until the user picks a location");
+  assert.equal(k6.length, 1, "only the lower K6 remains selectable");
+  assert.equal(k6[0].id, "R070");
   assert.equal(findRoomMatches(rooms, "K6", "N").length, 0);
   for (const room of k6) {
     assert.equal(findRoomMatches(rooms, `${room.label} ( ${room.id} )`, " k ")[0]?.id, room.id);
     assert.equal(findRoomMatches(rooms, room.aliases![0])[0]?.id, room.id);
+  }
+  for (const legacy of ["R069", "K6 (R069)", "K6 (upper map location)"]) {
+    assert.equal(findRoomMatches(rooms, legacy, "K")[0]?.id, "R068");
   }
 });
 

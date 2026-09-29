@@ -26,7 +26,7 @@ test('first-install precaching waits for idle and cancelled pages never register
   Object.defineProperty(dom.window.navigator, 'serviceWorker', {configurable: true, value: serviceWorker});
   try {
     const {createRoot} = await import('react-dom/client');
-    const {OfflineStatus} = await import('./web/src/features/offline/OfflineStatus.js');
+    const {OfflineStatus} = await import('../../web/src/features/offline/OfflineStatus.js');
     for (const runIdle of [false, true]) {
       const root = createRoot(document.querySelector('#root')!);
       try {

@@ -128,7 +128,9 @@ export function validateMapData(roomInput: unknown, csv: string, evacuationInput
   const evacuation = record(evacuationInput) ? evacuationInput : {};
   if (!record(evacuationInput)) fail('evacuation_data', 'expected an object');
   const source = record(evacuation.provenance) ? evacuation.provenance : {};
-  if (source.sourceKind !== 'supplied_reference') fail('provenance.sourceKind', 'expected supplied_reference');
+  if (source.sourceKind !== 'supplied_reference' && source.sourceKind !== 'official_site_map') fail('provenance.sourceKind', 'expected supplied_reference or official_site_map');
+  if (evacuation.routesAvailable !== undefined && typeof evacuation.routesAvailable !== 'boolean') fail('routesAvailable', 'expected a boolean');
+  const routesAvailable = evacuation.routesAvailable !== false;
   for (const key of ['originalFilename', 'sourceFile']) if (!text(source[key])) fail(`provenance.${key}`, 'expected non-empty text');
   if (typeof source.sourceImageSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(source.sourceImageSha256)) fail('provenance.sourceImageSha256', 'expected a SHA-256 fingerprint');
   const sourceSize = size(source.imageSize) ? source.imageSize : undefined;
@@ -139,7 +141,7 @@ export function validateMapData(roomInput: unknown, csv: string, evacuationInput
   }
   const groupNames = ['red', 'blue', 'green', 'black'];
   const groups = record(evacuation.groups) ? evacuation.groups : {};
-  for (const name of groupNames) {
+  for (const name of routesAvailable ? groupNames : []) {
     const group = groups[name];
     if (!record(group)) { fail(`groups.${name}`, 'expected group information'); continue; }
     for (const key of ['title', 'destination', 'shortDestination']) if (!text(group[key])) fail(`groups.${name}.${key}`, 'expected non-empty text');
@@ -149,6 +151,13 @@ export function validateMapData(roomInput: unknown, csv: string, evacuationInput
     if (group.description !== undefined && !text(group.description)) fail(`groups.${name}.description`, 'expected non-empty text');
   }
   for (const name of Object.keys(groups)) if (!groupNames.includes(name)) fail(`groups.${name}`, 'unknown assembly group');
+  if (!routesAvailable) {
+    if (Object.keys(groups).length) fail('groups', 'must be empty while routes are unavailable');
+    for (const key of ['ranges', 'exact', 'whole'] as const) {
+      const value = evacuation[key];
+      if ((Array.isArray(value) && value.length) || (record(value) && Object.keys(value).length)) fail(key, 'assignments must be empty while routes are unavailable');
+    }
+  }
   const exceptions = record(evacuation.inventoryExceptions) ? evacuation.inventoryExceptions : {};
   if (!record(evacuation.inventoryExceptions)) fail('inventoryExceptions', 'expected an object with documented exceptions');
   for (const [key, value] of Object.entries(exceptions)) if (!text(key) || !text(value)) fail(`inventoryExceptions.${key}`, 'expected an explanation');
@@ -215,9 +224,12 @@ export function validateMapData(roomInput: unknown, csv: string, evacuationInput
 
 /** Check the JSON/CSV plus the actual PNG dimensions, without generating any files. */
 export function validateMapFiles(directory: string): ValidationResult {
-  const readJson = (name: string): unknown => JSON.parse(readFileSync(resolve(directory, name), 'utf8'));
+  const dataDirectory = existsSync(resolve(directory, 'src/data/room_regions.json'))
+    ? resolve(directory, 'src/data')
+    : directory;
+  const readJson = (name: string): unknown => JSON.parse(readFileSync(resolve(dataDirectory, name), 'utf8'));
   const roomData = readJson('room_regions.json'), evacuation = readJson('evacuation_data.json');
-  const result = validateMapData(roomData, readFileSync(resolve(directory, 'room_index.csv'), 'utf8'), evacuation);
+  const result = validateMapData(roomData, readFileSync(resolve(dataDirectory, 'room_index.csv'), 'utf8'), evacuation);
   function checkImage(path: unknown, expected: unknown, label: string, expectedHash?: unknown) {
     if (!text(path) || !size(expected)) return;
     try {
@@ -235,7 +247,7 @@ export function validateMapFiles(directory: string): ValidationResult {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const here = dirname(fileURLToPath(import.meta.url));
-  const root = existsSync(resolve(here, 'room_regions.json')) ? here : resolve(here, '..');
+  const root = existsSync(resolve(here, 'data/room_regions.json')) ? resolve(here, '..') : resolve(here, '../..');
   try {
     const result = validateMapFiles(root);
     for (const warning of result.warnings) console.warn(`Warning: ${warning}`);

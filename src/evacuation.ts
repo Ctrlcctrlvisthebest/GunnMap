@@ -13,7 +13,7 @@ interface GroupInfo {
   description?: string;
 }
 export interface EvacuationProvenance {
-  sourceKind: 'supplied_reference';
+  sourceKind: 'supplied_reference' | 'official_site_map';
   originalFilename: string;
   sourceFile: string;
   sourceImageSha256: string;
@@ -23,6 +23,7 @@ export interface EvacuationProvenance {
 }
 export interface EvacuationData {
   provenance: EvacuationProvenance;
+  routesAvailable?: boolean;
   groups: Record<Group, GroupInfo>;
   inventoryExceptions: Record<string, string>;
   ranges: [string, number, number, Group, string, Pixels][];
@@ -39,6 +40,7 @@ const data = readJson<EvacuationData>('evacuation_data.json');
 export function evacuationOverview() {
   return {
     provenance: data.provenance,
+    routesAvailable: data.routesAvailable !== false,
     groups: Object.fromEntries(Object.entries(data.groups).map(([key, group]) => [key, {
       ...group,
       short_destination: group.shortDestination,
@@ -67,6 +69,11 @@ function mapped([group,reference_label,[left,top,right,bottom]]: Assignment): Ev
 }
 /** Only assign rooms explicitly supported by the supplied reference. */
 export function evacuationForRoom(room: {label?:string; building?:string}): Evacuation {
+  if (data.routesAvailable === false) {
+    return {status:'unconfirmed',group:null,color:null,short_destination:null,reference_label:null,focus:null,
+      destination:'Assembly area not confirmed for this room',
+      note:'The September 3, 2026 school site map does not show evacuation routes or assembly points. Follow current school staff directions.'};
+  }
   const canonical = (room.label ?? '').trim().toUpperCase().replace(/[\s-]+/g,'');
   const building = (room.building ?? '').trim().toUpperCase();
   const numbered = canonical.match(/^([A-Z]+)([1-9][0-9]*)$/);

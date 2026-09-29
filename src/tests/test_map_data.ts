@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ROOT } from './project.js';
-import { evacuationForRoom, evacuationOverview, type EvacuationData, type EvacuationProvenance } from './evacuation.js';
-import { validateMapData, validateMapFiles } from './validate_map_data.js';
+import { ROOT } from '../project.js';
+import { evacuationForRoom, evacuationOverview, type EvacuationData, type EvacuationProvenance } from '../evacuation.js';
+import { validateMapData, validateMapFiles } from '../validate_map_data.js';
 
 interface Fixture {
   roomData: {
@@ -16,12 +16,12 @@ interface Fixture {
   };
   csv: string;
   evacuationData: {
-    provenance: EvacuationProvenance; ranges: unknown[][];
+    provenance: EvacuationProvenance; routesAvailable?: boolean; ranges: unknown[][];
     groups: EvacuationData['groups']; inventoryExceptions: Record<string, string>;
     exact: Record<string, unknown[]>; whole: Record<string, unknown[]>;
   };
 }
-const reference = JSON.parse(readFileSync(join(ROOT, 'evacuation_data.json'), 'utf8')) as EvacuationData;
+const reference = JSON.parse(readFileSync(join(ROOT, 'src/data/evacuation_data.json'), 'utf8')) as EvacuationData;
 
 function fixture(): Fixture {
   return {
@@ -32,7 +32,11 @@ function fixture(): Fixture {
     csv: 'id,label,building,purpose\nR001,A101,A,\n',
     evacuationData: {
       provenance: {...reference.provenance, sourceFile: 'reference.png', imageSize: [200, 100]},
-      groups: Object.fromEntries(Object.entries(reference.groups).map(([name, group]) => [name, {...group, labels: [...group.labels, ...['A101-A103', 'A104-A105', 'B101-B103', 'Another group', 'A101', 'A'].filter(label => !group.labels.includes(label))]}])) as EvacuationData['groups'],
+      groups: Object.fromEntries(['red', 'blue', 'green', 'black'].map(name => [name, {
+        title: `${name} test group`, color: '#123456', destination: 'Test assembly area',
+        shortDestination: 'Test area',
+        labels: ['A101-A103', 'A104-A105', 'B101-B103', 'Another group', 'A101', 'A', 'E1-E2', 'Titan Gym'],
+      }])) as EvacuationData['groups'],
       inventoryExceptions: {},
       ranges: [['A', 101, 103, 'green', 'A101-A103', [20, 20, 40, 30]]], exact: {}, whole: {},
     },
@@ -49,20 +53,33 @@ test('repository data, inventory and actual PNG dimensions are consistent', () =
   assert.deepEqual(validateMapFiles(ROOT), {errors: [], warnings: []});
 });
 
-test('evacuation responses preserve the supplied source without claiming an official verification date', () => {
-  const {provenance, validationIssues} = evacuationOverview();
-  assert.equal(provenance.sourceKind, 'supplied_reference');
-  assert.equal(provenance.originalFilename, '截屏2026-09-23 上午9.00.56.png');
-  assert.deepEqual(provenance.imageSize, [1852, 1156]);
-  assert.equal(provenance.sourceRevisionDate, null);
+test('current site map provenance is exact and evacuation routes remain unavailable', () => {
+  const {provenance, routesAvailable, groups, validationIssues} = evacuationOverview();
+  assert.equal(provenance.sourceKind, 'official_site_map');
+  assert.equal(provenance.originalFilename, 'UpdatedGunncampusMap9-3-26.pdf');
+  assert.deepEqual(provenance.imageSize, [2448, 1584]);
+  assert.equal(provenance.sourceRevisionDate, '2026-09-03');
   assert.equal(provenance.verifiedOn, null);
+  assert.equal(routesAvailable, false);
+  assert.deepEqual(groups, {});
   assert.deepEqual(validationIssues, []);
   const mapped = evacuationForRoom({label: 'N214', building: 'N'});
-  assert.equal(mapped.reference_label, 'N201-N217');
-  assert.deepEqual(mapped.focus, {x: 1696 / 1852, y: 380 / 1156, width: 126 / 1852, height: 32 / 1156});
+  assert.equal(mapped.status, 'unconfirmed');
+  assert.equal(mapped.reference_label, null);
+  assert.equal(mapped.focus, null);
   const unresolved = evacuationForRoom({label: 'E01', building: 'E'});
   assert.equal(unresolved.status, 'unconfirmed');
   assert.equal(unresolved.focus, null);
+});
+
+test('unavailable routes cannot silently retain historical assignments', () => {
+  const value = fixture();
+  value.evacuationData.provenance.sourceKind = 'official_site_map';
+  value.evacuationData.routesAvailable = false;
+  assert.match(validate(value).errors.join('\n'), /assignments must be empty while routes are unavailable/);
+  value.evacuationData.ranges = [];
+  value.evacuationData.groups = {} as EvacuationData['groups'];
+  assert.deepEqual(validate(value).errors, []);
 });
 
 test('unique IDs and CSV membership are enforced while duplicate room labels remain valid', () => {

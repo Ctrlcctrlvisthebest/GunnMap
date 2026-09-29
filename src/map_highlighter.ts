@@ -2,6 +2,7 @@ import sharp, { type Sharp } from 'sharp';
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { ROOT, readJson, roomData, rooms, type Point } from './project.js';
+import { findRoomMatches } from './domain/room-matching.js';
 export const xml = (value: string) => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 export const svg = (width:number,height:number,body:string) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${body}</svg>`);
 export async function saveImage(image: Sharp, output: string): Promise<string> {
@@ -50,9 +51,7 @@ function coloredStrips(polygon: Point[], colors: readonly string[]): { polygon: 
 }
 export async function renderRooms(colors: Record<string,string | readonly string[]>, options: HighlightOptions = {}): Promise<Buffer> {
   const polygons = Object.entries(colors).flatMap(([name,color])=>{
-    const key=name.trim().toLowerCase();
-    const byId=rooms.find(r=>r.id.toLowerCase()===key);
-    const matches=byId?[byId]:rooms.filter(r=>[r.label,...(r.aliases??[])].some(label=>label.toLowerCase()===key));
+    const matches=findRoomMatches(rooms,name);
     if (!matches.length) throw new Error(`Unknown room '${name}'; see room_index.csv`);
     if (matches.length>1) throw new Error(`Room label '${name}' is duplicated; select one of ${matches.map(r=>r.id).join(', ')}`);
     const palette = typeof color === 'string' ? [color] : color;

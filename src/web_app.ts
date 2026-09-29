@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
-import { findRoomMatches } from './src/domain/room-matching.js';
+import { findRoomMatches } from './domain/room-matching.js';
 import { evacuationDataIssues, evacuationForRoom, evacuationOverview } from './evacuation.js';
 import { renderRooms, xml } from './map_highlighter.js';
 import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_CLEANUP_INTERVAL_MS, removeExpiredMap, validateRetentionMs } from './output_retention.js';

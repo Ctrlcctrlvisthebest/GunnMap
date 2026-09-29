@@ -8,6 +8,7 @@ interface UsePanzoomOptions {
   active: boolean;
   fit?: boolean;
   focus?: { x: number; y: number; scale?: number };
+  animateFocus?: boolean;
   sourceKey?: string;
 }
 
@@ -15,7 +16,7 @@ export function usePanzoom(
   stage: RefObject<HTMLElement | null>,
   art: RefObject<HTMLElement | null>,
   image: RefObject<HTMLImageElement | null>,
-  { active, fit = false, focus, sourceKey }: UsePanzoomOptions,
+  { active, fit = false, focus, animateFocus = false, sourceKey }: UsePanzoomOptions,
 ) {
   const instanceRef = useRef<ReturnType<typeof Panzoom> | null>(null);
   const zoomIn = useCallback(() => { instanceRef.current?.zoomIn({ animate: false }); }, []);
@@ -30,8 +31,15 @@ export function usePanzoom(
     let instance: ReturnType<typeof Panzoom> | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let wheelListener: ((event: WheelEvent) => void) | null = null;
+    let focusFrame: number | null = null;
+
+    const cancelFocus = () => {
+      if (focusFrame !== null) cancelAnimationFrame(focusFrame);
+      focusFrame = null;
+    };
 
     const destroyPanzoom = () => {
+      cancelFocus();
       if (wheelListener) viewport.removeEventListener("wheel", wheelListener);
       wheelListener = null;
       if (instanceRef.current === instance) instanceRef.current = null;
@@ -74,16 +82,22 @@ export function usePanzoom(
       viewport.addEventListener("wheel", wheelListener, { passive: false });
       if (focus && !fit) {
         const active = instance;
-        active.zoom(focus.scale ?? 2, { animate: false });
-        requestAnimationFrame(() => {
+        const moveToFocus = () => {
           if (instance !== active) return;
+          const animate = animateFocus && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          const motion = { animate, duration: 900, easing: "cubic-bezier(0.22, 1, 0.36, 1)" };
+          active.zoom(focus.scale ?? 2, motion);
           const targetX = focus.x * artwork.clientWidth;
           const targetY = focus.y * artwork.clientHeight;
           active.pan(
             artwork.clientWidth / 2 - targetX,
             artwork.clientHeight / 2 - targetY,
-            { animate: false, relative: false },
+            { ...motion, relative: false },
           );
+        };
+        // Let the complete map paint before starting the camera transition.
+        focusFrame = requestAnimationFrame(() => {
+          focusFrame = requestAnimationFrame(moveToFocus);
         });
       }
     };
@@ -107,7 +121,7 @@ export function usePanzoom(
       resizeObserver?.disconnect();
       destroyPanzoom();
     };
-  }, [active, art, fit, focus?.x, focus?.y, focus?.scale, image, sourceKey, stage]);
+  }, [active, animateFocus, art, fit, focus?.x, focus?.y, focus?.scale, image, sourceKey, stage]);
 
   return { zoomIn, zoomOut, reset };
 }

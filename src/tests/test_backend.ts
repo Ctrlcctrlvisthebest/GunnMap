@@ -5,34 +5,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import sharp from 'sharp';
-import { createApp, renderPeriods, resolveRoom } from './web_app.js';
-import { evacuationForRoom } from './evacuation.js';
-import { rooms, roomData, ROOT } from './project.js';
-import { renderRooms } from './map_highlighter.js';
+import { createApp, renderPeriods, resolveRoom } from '../web_app.js';
+import { evacuationForRoom } from '../evacuation.js';
+import { rooms, roomData, ROOT } from '../project.js';
+import { renderRooms } from '../map_highlighter.js';
 const periods = (building: string, room: string, color = '#0284c7') => [
   { building, room, color },
   ...Array.from({ length: 6 }, () => ({ building: '', room: '', color: '#000000' })),
 ];
 
-test('N214 variants retain identity and football-field destination', () => {
+test('N214 variants retain identity without claiming a current evacuation route', () => {
  assert.equal(resolveRoom(' Ｎ ', 'Ｒ １４８').building, 'N');
  for (const value of ['N214', 'n214', 'n-214', ' N214 ', 'Ｎ－２１４', 'n—214', 'Ｒ １４８', 'N214 （R 148）']) {
   const room = resolveRoom('N', value);
   assert.equal(room.id, 'R148');
-  assert.equal(
-   evacuationForRoom(room).destination,
-   'Football field — section labeled N201-N217',
-  );
+  assert.equal(evacuationForRoom(room).status, 'unconfirmed');
+  assert.equal(evacuationForRoom(room).group, null);
  }
 });
-test('source range boundaries and unresolved rooms remain explicit', async () => {
- const cases = JSON.parse(
-  await readFile(join(ROOT, 'evacuation_test_cases.json'), 'utf8'),
- ) as { label: string; group: string | null }[];
- for (const { label, group } of cases) {
-  const building = label.match(/^[A-Z]+/)?.[0];
-  assert.ok(building, `A building prefix is required for ${label}`);
-  assert.equal(evacuationForRoom({ label, building }).group, group, label);
+test('current site map leaves all assembly areas unconfirmed', () => {
+ for (const room of rooms) {
+  const evacuation = evacuationForRoom(room);
+  assert.equal(evacuation.status, 'unconfirmed', room.label);
+  assert.equal(evacuation.group, null, room.label);
+  assert.equal(evacuation.focus, null, room.label);
  }
  assert.equal(
   evacuationForRoom({ label: 'N214', building: 'M' }).status,
@@ -40,7 +36,7 @@ test('source range boundaries and unresolved rooms remain explicit', async () =>
  );
  assert.equal(
   evacuationForRoom({ label: 'D-LIB', building: 'D' }).group,
-  'green',
+  null,
  );
  for (const room of rooms) {
   const focus = evacuationForRoom(room).focus;
@@ -49,18 +45,44 @@ test('source range boundaries and unresolved rooms remain explicit', async () =>
   assert.ok(focus.x + focus.width <= 1 && focus.y + focus.height <= 1);
  }
 });
-test('duplicate K6 rooms use readable location aliases and keep legacy IDs', () => {
- assert.throws(
-  () => resolveRoom('K', 'K6'),
-  /K6 \(upper map location\), K6 \(lower map location\)/,
- );
- const matches = rooms.filter(room => room.label === 'K6');
- assert.equal(matches.length, 2);
- for (const room of matches) {
-  assert.equal(resolveRoom('K', room.aliases![0]).id, room.id);
-  assert.equal(resolveRoom('K', `K6 (${room.id})`).id, room.id);
-  assert.equal(evacuationForRoom(room).reference_label, 'K6-K13');
+test('renumbered E and K rooms use current identities without reviving retired IDs', () => {
+ assert.equal(resolveRoom('E', 'E01').id, 'R153');
+ assert.equal(resolveRoom('E', 'E05').id, 'R157');
+ assert.equal(resolveRoom('K', 'K3').id, 'R158');
+ assert.equal(resolveRoom('K', 'K4').id, 'R159');
+ for (const value of ['E09', 'E10', 'E14', 'E15', 'E17', 'R028', 'R029']) {
+  assert.throws(() => resolveRoom('E', value), /not found/);
  }
+ for (const value of ['K7', 'R066', 'R067', 'R071']) {
+  assert.throws(() => resolveRoom('K', value), /not found/);
+ }
+});
+test('printed upper K5 is bounded while legacy R069 resolves to it and lower K6 stays selectable', async () => {
+ const k5 = resolveRoom('K', 'K5');
+ const k6 = resolveRoom('K', 'K6');
+ assert.equal(k5.id, 'R068');
+ assert.deepEqual(k5.polygon, [[660,394],[681,394],[681,425],[660,425]]);
+ assert.equal(k6.id, 'R070');
+ const matches = rooms.filter(room => room.label === 'K6');
+ assert.equal(matches.length, 1);
+ assert.equal(resolveRoom('K', 'K6 (lower map location)').id, k6.id);
+ assert.equal(resolveRoom('K', 'K6 (R070)').id, k6.id);
+ for (const legacy of ['R069', 'K6 (R069)', 'K6 (upper map location)']) {
+  assert.equal(resolveRoom('K', legacy).id, k5.id);
+ }
+ assert.equal(evacuationForRoom(k5).reference_label, null);
+ assert.equal(evacuationForRoom(k6).reference_label, null);
+ const dir = await mkdtemp(join(tmpdir(),'gunnmap-merged-k5-'));
+ try {
+  const [width,height] = roomData.image_size;
+  const baseImage = join(dir,'blank.png');
+  await sharp({create:{width,height,channels:3,background:'#ffffff'}}).png().toFile(baseImage);
+  const image = await renderRooms({'R069':'#ff0000'},{opacity:1,baseImage});
+  const {data,info} = await sharp(image).raw().toBuffer({resolveWithObject:true});
+  const pixel = (x:number,y:number) => Array.from(data.subarray((y*info.width+x)*info.channels,(y*info.width+x)*info.channels+3));
+  assert.deepEqual(pixel(675,400),[255,0,0]);
+  assert.deepEqual(pixel(675,430),[255,255,255]);
+ } finally { await rm(dir,{recursive:true,force:true}); }
  assert.throws(() => resolveRoom('M', 'R148'), /not in/);
 });
 test('shared rooms render every period color in clipped horizontal and vertical strips',async()=>{
@@ -95,9 +117,9 @@ test('downloaded PNG includes all seven legend swatches without changing map coo
   const pixel=(x:number,y:number)=>Array.from(data.subarray((y*info.width+x)*info.channels,(y*info.width+x)*info.channels+3));
   for(let i=0;i<7;i++) {
    assert.deepEqual(pixel(455,1313+i*34),palette[i].slice(1).match(/../g)!.map(hex=>parseInt(hex,16)));
-   assert.deepEqual(result.selected[i].marker,[1663.5,574.5]);
+   assert.deepEqual(result.selected[i].marker,[1651.5,576.5]);
    assert.deepEqual(result.selected[i].polygon,resolveRoom('N','N214').polygon);
-   assert.equal(result.selected[i].evacuation.group,'black');
+   assert.equal(result.selected[i].evacuation.group,null);
    assert.equal(result.selected[i].floor,2);
   }
   // Check rasterized title and row text, not just the color swatches.
@@ -126,9 +148,9 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const first = await response.json();
-  assert.equal(first.selected[0].evacuation.group, 'black');
+  assert.equal(first.selected[0].evacuation.group, null);
   assert.equal(first.selected[0].building, 'N');
-  assert.deepEqual(first.selected[0].marker, [1663.5, 574.5]);
+  assert.deepEqual(first.selected[0].marker, [1651.5, 576.5]);
   const imageResponse = await fetch(base + first.image_url);
   assert.equal(imageResponse.headers.get('cache-control'), 'no-store');
   assert.equal(imageResponse.headers.get('etag'), null);
@@ -154,7 +176,7 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0],/split into each period's color/);
   const shared=await sharp(await readFile(join(dir,result.image_url.split('/').pop()!))).removeAlpha().raw().toBuffer();
-  const left=(588*roomData.image_size[0]+1649)*3,right=(588*roomData.image_size[0]+1678)*3;
+  const left=(580*roomData.image_size[0]+1640)*3,right=(580*roomData.image_size[0]+1665)*3;
   assert.ok(shared[left+2]>shared[left]+100,'first period remains blue');
   assert.ok(shared[right]>shared[right+2]+100,'second period remains red');
   const invalidBodies = [

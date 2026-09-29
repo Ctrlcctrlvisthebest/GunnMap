@@ -5,7 +5,7 @@
 1. **整体层级偏平**：区分导航、页面介绍、排课编辑器和地图预览的视觉层级；减少首屏装饰占高，明确卡片边界和操作主次。
 2. **窄屏标识重叠**：period 数字与颜色条不再争用狭窄列；手机布局隐藏重复的 `PERIOD` 字样，并在 402、375、360、320px 宽度检查无横向溢出。
 3. **iPhone 独立 Web App 配置**：增加 standalone manifest、iOS 主屏幕元数据、安全区留白和图标。完成 iPhone 17 常见逻辑宽度的浏览器视口检查；真机安装验证待 iPhone 空闲并可连接后完成。
-4. **Room 列表的 `RXXX`**：K6 重名项改用 “upper map location” / “lower map location” 作为可读选择名；旧分享链接和稳定 R 编号仍可解析。
+4. **Room 列表的 `RXXX`**：现场核实后将原 upper K6（R069）并入 K5（R068），只保留 lower K6（R070）供选择；旧分享链接中的 R069 仍解析到 K5。
 5. **导航**：手机端滚动时固定在顶部；页面内容不淡入淡出，只平滑移动一个当前项背景指示器；已按要求移除切页时露出的 Skip to content 标识。
 6. **低频功能**：Share Link、Saved schedules、Load Example、Clear Schedule 收进右上角 More；统一摘要高度和 CSS 箭头。
 7. **文案**：移除含义不明的 “Your campus. Your way.” 等宣传/占位文字。

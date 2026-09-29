@@ -5,7 +5,7 @@ import { build } from 'vite';
 
 const root = process.cwd();
 const resources: Record<string, string[]> = {
-  '/': ['web/index.html', 'server_policy.ts', 'web_app.ts'],
+  '/': ['web/index.html', 'src/server_policy.ts', 'src/web_app.ts'],
   '/main.js': ['dist/web/main.js'],
   '/ui.css': ['dist/web/ui.css'],
   '/style.css': ['web/style.css'],
@@ -19,8 +19,8 @@ const resources: Record<string, string[]> = {
 };
 // API revisions include generation/serialization code as well as data. A data-only
 // hash would incorrectly retain old payloads after the API response format changes.
-const apiInputs = ['web_app.ts', 'project.ts', 'room_regions.json', 'evacuation_data.json',
-  'evacuation.ts', 'src/domain/room-matching.ts'];
+const apiInputs = ['src/web_app.ts', 'src/project.ts', 'src/data/room_regions.json', 'src/data/evacuation_data.json',
+  'src/evacuation.ts', 'src/domain/room-matching.ts'];
 for (const path of ['/api/rooms', '/api/offline-rooms', '/api/evacuation-data']) resources[path] = apiInputs;
 for (const name of (await readdir(resolve(root, 'dist/web/assets'))).sort()) {
   if (/\.(?:js|css|woff2?|svg|png|webp)$/.test(name)) resources[`/assets/${name}`] = [`dist/web/assets/${name}`];

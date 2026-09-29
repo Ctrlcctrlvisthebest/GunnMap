@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_MAP_RETENTION_MS } from './output_retention.js';
+import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_MAP_RETENTION_MS } from '../output_retention.js';
 
 test('retention removes only expired complete personal maps', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'gunnmap-retention-'));

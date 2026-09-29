@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2448" height="1584" viewBox="0 0 2448 1584">
+  <!-- Former upper K6 is now part of K5. Keep the outer walls intact. -->
+  <rect x="666" y="411" width="18" height="33" fill="white" />
+  <path d="M665 411 V444 M684 411 V444" fill="none" stroke="black" stroke-width="1.5" />
+</svg>

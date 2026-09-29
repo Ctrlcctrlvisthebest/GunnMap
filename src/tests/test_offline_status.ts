@@ -22,7 +22,7 @@ test('a mounted offline status reloads controlled tabs on activation but not on 
   for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, {configurable: true, value});
   try {
     const {createRoot} = await import('react-dom/client');
-    const {OfflineStatus} = await import('./web/src/features/offline/OfflineStatus.js');
+    const {OfflineStatus} = await import('../../web/src/features/offline/OfflineStatus.js');
     for (const initiallyControlled of [true, false]) {
       reloads = 0;
       const activations: unknown[] = [];
