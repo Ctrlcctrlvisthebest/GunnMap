@@ -1,4 +1,7 @@
 export const PUBLIC_CACHE_PREFIX = 'gunnmap-public-';
+export const PUBLIC_MANIFEST_KEY = '/__gunnmap_precache_manifest__';
+export const NETWORK_GET_TIMEOUT_MS = 4000;
+export const UNSAVED_IMAGE_TIMEOUT_MS = 15000;
 export const PERSONAL_CACHE = 'gunnmap-personal-offline-v1';
 export const PERSONAL_IMAGE_KEY = '/__gunnmap_saved_map__';
 export const PERSONAL_SOURCE_HEADER = 'X-GunnMap-Saved-Source';
