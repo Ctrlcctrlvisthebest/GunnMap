@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export function OfflineStatus() {
   const [online, setOnline] = useState(() => navigator.onLine);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => Boolean(navigator.serviceWorker?.controller));
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
   const [failed, setFailed] = useState(false);
   const reloading = useRef(false);
@@ -23,10 +23,12 @@ export function OfflineStatus() {
       if (event.data?.type === 'GUNNMAP_OFFLINE') setOnline(false);
       else if (event.data?.type === 'GUNNMAP_ONLINE') setOnline(true);
     };
-    const register = async () => {
-      if (!('serviceWorker' in navigator)) {setFailed(true); return;}
+    if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', message);
       navigator.serviceWorker.addEventListener('controllerchange', workerChanged);
+    }
+    const register = async () => {
+      if (!('serviceWorker' in navigator)) {setFailed(true); return;}
       try {
         const registration = await navigator.serviceWorker.register('/sw.js', {scope: '/', updateViaCache: 'none'});
         if (!active) return;
@@ -45,9 +47,17 @@ export function OfflineStatus() {
         registration.addEventListener('updatefound', () => observe(registration.installing));
       } catch {if (active) setFailed(true);}
     };
-    void register();
+    let idle: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Initial precaching competes with the first route's scripts and room list.
+    // Existing workers check for updates immediately; new installs wait for idle.
+    if (controlled) void register();
+    else if ('requestIdleCallback' in window) idle = window.requestIdleCallback(() => { void register(); }, { timeout: 1500 });
+    else timer = setTimeout(() => { void register(); }, 500);
     return () => {
       active = false;
+      if (idle !== undefined) window.cancelIdleCallback(idle);
+      clearTimeout(timer);
       window.removeEventListener('online', connected);
       window.removeEventListener('offline', disconnected);
       navigator.serviceWorker?.removeEventListener('message', message);

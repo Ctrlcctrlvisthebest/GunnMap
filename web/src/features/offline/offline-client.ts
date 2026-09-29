@@ -13,7 +13,7 @@ export async function saveMapOffline(path: string): Promise<void> {
   if (!validPath) throw new Error('This map cannot be saved offline.');
   const registration = await navigator.serviceWorker.getRegistration('/');
   if (!registration?.active) throw new Error('Offline setup is still loading. Try again in a moment.');
-  const response = await fetch(validPath);
+  const response = await fetch(validPath, { credentials: 'omit' });
   if (!await isValidPng(response)) throw new Error('The map could not be downloaded as a complete PNG. Reconnect and try again.');
   const blob = await response.blob();
   try {
