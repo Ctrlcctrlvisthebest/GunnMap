@@ -43,7 +43,7 @@ Compiled files live in `dist/`, including the React browser bundles and service 
 
 ## Browser app structure
 
-The browser is a React single-page app with routes for Schedule Map, Evacuation Routes, Find a Room, and Generated Map. The shared shell owns navigation and the mobile brand scroll position; each route is a page component. Schedule persistence and editing, room lookup and suggestions, evacuation data, and map pan/zoom live in feature modules. Shared Web Awesome controls and toast notifications live in `web/src/shared/`. Room matching is shared across the browser and Node service in `src/domain/room-matching.ts`. Keep page-specific UI in `web/src/pages/` and put reusable domain behavior in the feature that owns it. The Node server, Sharp map renderer, room data, and API contracts remain outside the React UI.
+The browser is a React single-page app with routes for Schedule Map, Evacuation Routes, Find a Room, and Generated Map. The shared shell owns navigation and the mobile brand scroll position; each route is a page component. Schedule persistence and editing, room lookup and suggestions, evacuation data, and map pan/zoom live in feature modules. Shared controls and toast notifications live in `web/src/shared/`. Selects use native controls; one shared color editor loads only when opened, and evacuation tooltips load with their page. Room matching is shared across the browser and Node service in `src/domain/room-matching.ts`. Keep page-specific UI in `web/src/pages/` and put reusable domain behavior in the feature that owns it. The Node server, Sharp map renderer, room data, and API contracts remain outside the React UI.
 
 ```text
 web/
@@ -53,7 +53,7 @@ web/
     app/          # React bootstrap, routes, and persistent site shell
     pages/        # Schedule, evacuation, room lookup, and generated map
     features/     # Schedule, rooms, maps, and evacuation behavior
-    shared/       # Web Awesome registration, controls, and notifications
+    shared/       # Theme, native controls, and notifications
 src/domain/       # Domain rules shared by the browser and Node server
 ```
 
@@ -79,7 +79,7 @@ The separate Find a Room page supports a room number or familiar aliases such as
 
 All map viewers include visible zoom and reset controls. When the map is focused, use +/− to zoom, arrow keys to pan, and Home or 0 to reset.
 
-The navigation links to Schedule Map, Evacuation Routes, Find a Room, and Generated Map. On narrow screens, the GunnMap brand scrolls away while the navigation remains available. Switching pages preserves the brand's current position: if it is fully visible, partly visible, or hidden, it stays in that state on the next page, including when that page is too short to scroll naturally. Scrolling back toward the top reveals it. Page cards share the same border, width, and outer gutter. The assembly-point heading moves above its cards when the available width is limited, and the schedule Building field is hidden at widths up to 430 px to leave room for the room entry. The site includes a web app manifest and install icons for supported browsers.
+The navigation links to Schedule Map, Evacuation Routes, Find a Room, and Generated Map. On narrow screens, the GunnMap brand scrolls away while the navigation remains available. Switching pages preserves the brand's current position: if it is fully visible, partly visible, or hidden, it stays in that state on the next page, including when that page is too short to scroll naturally. Scrolling back toward the top reveals it. Page cards share the same border, width, and outer gutter. The assembly-point heading moves above its cards when the available width is limited. At widths up to 430 px, building selection is created only when the manual-building control is opened; room auto-detection remains the default. The site includes a web app manifest and install icons for supported browsers.
 
 ### Offline use
 
@@ -87,7 +87,9 @@ On HTTPS or localhost, the app downloads a consistent version of its pages, camp
 
 On Generated Map, choose **Save offline** to keep one personal map on this device. Saving another replaces it only after a complete image downloads and decodes successfully. **Remove offline copy** deletes it. Personal maps are never automatically put into the offline cache. Download PNG remains available for browsers without service workers or when browser storage is full. Browser settings can clear offline data.
 
-An available app update offers an explicit reload. Public data and scripts update together, preserving the saved personal image. For browser changes during development, rebuild, reload, and accept the update prompt. Existing open pages continue using their previous complete build until the update is activated.
+An available app update offers an explicit reload. A per-resource revision manifest reuses unchanged public assets from the previous cache and downloads changed resources. The new worker activates only after its complete cache has been prepared; a failed install preserves the previous working version and the saved personal image. For browser changes during development, rebuild, reload, and accept the update prompt. Existing open pages continue using their previous complete build until the update is activated. Room lookup and saved personal images use a bounded network wait before falling back to their offline copies, including when a weak connection hangs instead of failing immediately.
+
+Public maps are displayed and cached as lossless WebP files built from the original PNGs. The build preserves their pixels, dimensions and map coordinates. Download PNG creates a real PNG from this display copy in the browser, so downloading also works offline without caching both formats. The original PNG routes and map source files remain available.
 
 ## Map data and maintenance
 
@@ -97,9 +99,32 @@ Period colors and evacuation groups are independent. Default colors and the exam
 
 `evacuation_data.json` records room assignments, group colors, source kind, original filename, source hash, and source dimensions. `npm run data:validate` checks room polygons, stable IDs, CSV alignment, ambiguous aliases, supplied image integrity, assignment boundaries and overlaps, group labels, and reference coordinates; the build runs it automatically. The supplied image has no revision date, and a manual verification date has not been recorded; both remain explicitly unknown. `evacuation.ts` leaves unlisted rooms unconfirmed, including E01 rather than guessing it means E1. Public room and evacuation responses are prepared at server startup; restart after changing these data files. This is a reference, not live emergency routing; follow current school staff instructions.
 
-Public static files and inventory JSON use ETags for revalidation; text responses support gzip, and Vite assets with content hashes can be cached for a year. Pages load their own code separately. Personal generated images use `Cache-Control: no-store` and unique URLs. The shared `/output/period_map.png` URL is neither written nor served.
+Public static files and inventory JSON use ETags for revalidation; text responses support gzip, and Vite assets with content hashes can be cached for a year. A bounded server cache reuses file bytes, compressed representations and their ETags, avoiding repeated reads and compression for unchanged requests. File metadata is rechecked so development rebuilds invalidate cached representations. The landing schedule is included in the entry to avoid a serial script request; secondary pages and the color editor load separately. Personal generated images use `Cache-Control: no-store` and unique URLs. The shared `/output/period_map.png` URL is neither written nor served.
 
-The server retains completed generated images for seven days by default. Set a positive `MAP_RETENTION_DAYS` value to change this, for example `MAP_RETENTION_DAYS=14 npm run dev`. Expired images are removed at startup, every hour, and on download requests; expired URLs return 404. There is no image-count cap that can evict fresh maps. Cleanup only targets completed UUID image files and preserves demos, temporary files, and source assets. Image-render concurrency has not been tuned; measure real simultaneous usage before adding a queue or limit.
+The server retains completed generated images for seven days by default. Set a positive `MAP_RETENTION_DAYS` value to change this, for example `MAP_RETENTION_DAYS=14 npm run dev`. Expired images are removed at startup, every hour, and on download requests; expired URLs return 404. Cleanup only targets completed UUID image files and preserves demos, temporary files, and source assets. Render admission, concurrency, queue length and storage budgets are bounded; reaching a limit rejects new work rather than deleting unexpired images. Tune these limits against measured traffic and available server resources.
+
+Drafts and templates remain versioned JavaScript-readable cookies for compatibility. HTTPS cookies have `Secure` and `SameSite=Lax`; HTTP localhost remains usable for development. Public API and image fetches omit credentials. Cookies can still accompany ordinary same-origin navigation and asset requests: do not log Cookie headers, and do not describe these drafts as guaranteed to stay off the server. Sharing encodes schedules in the URL fragment, which is not sent in HTTP request URLs.
+
+## Server limits and deployment
+
+`POST /api/render` accepts `application/json` only. Browser requests must originate from the same site; non-browser clients without an Origin header remain supported. Cross-site Fetch Metadata is rejected. Defaults are intentionally bounded and configurable:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RENDER_RATE_LIMIT` | `60` | Accepted render requests per client per window |
+| `RENDER_RATE_WINDOW_MS` | `60000` | Rate-limit window |
+| `RENDER_RATE_CLIENTS` | `10000` | Maximum tracked clients; expired entries are discarded |
+| `RENDER_CONCURRENCY` | `2` | Simultaneous image renders |
+| `RENDER_QUEUE_LIMIT` | `8` | Maximum waiting requests; `0` disables waiting |
+| `RENDER_QUEUE_TIMEOUT_MS` | `10000` | Maximum queue wait |
+| `MAP_STORAGE_BYTES` | `536870912` | Completed personal images plus in-flight reservations, 512 MiB |
+| `MAP_MAX_BYTES` | `16777216` | Per-render reservation and maximum generated file size, 16 MiB |
+
+Rate limits return 429; full/expired queues or exhausted storage return 503. Retryable rejections include `Retry-After`. These limits apply to one Node process and the generated-image budget does not cover other files on the disk. Do not run multiple processes against one output directory without a shared admission/storage coordinator. Concurrency and rate settings are starting values, not throughput guarantees.
+
+The client key is the socket IP. Forwarded client headers are not trusted automatically. A reverse proxy or school NAT can put many users under one allowance; configure edge rate limits and the app allowance together for your deployment. Set `PUBLIC_ORIGIN=https://your-domain.example` behind an HTTPS reverse proxy so same-origin browser requests are accepted independently of its internal HTTP connection. Forwarded scheme/host headers do not override this setting.
+
+Responses include a Content Security Policy restricting scripts and connections to this origin, `nosniff`, anti-framing headers and a no-referrer policy. Inline styles remain allowed for React map positioning and the component theme. TLS is terminated by the deployment platform or trusted proxy. Set `ENABLE_HSTS=true` only after HTTPS works permanently and an HTTPS `PUBLIC_ORIGIN` is configured; it is off by default for local development.
 
 ## Map tools
 

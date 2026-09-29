@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "npm run build:web && node --import tsx web_app.ts",
-    "build:web": "tsc --noEmit -p tsconfig.web.json && tsc -p tsconfig.worker.json && vite build && node --import tsx build_offline.ts",
+    "build:web": "tsc --noEmit -p tsconfig.web.json && tsc -p tsconfig.worker.json && vite build && node --import tsx build_map_assets.ts && node --import tsx build_offline.ts",
     "prebuild": "npm run data:validate",
     "build": "tsc && npm run build:web",
     "start": "node dist/web_app.js",

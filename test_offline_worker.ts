@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import { rooms, roomData, ROOT } from './project.js';
 import { evacuationForRoom } from './evacuation.js';
 import { findRoomMatches } from './src/domain/room-matching.js';
-import { PERSONAL_CACHE, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER, PUBLIC_CACHE_PREFIX } from './web/offline/policy.js';
+import { NETWORK_GET_TIMEOUT_MS, PERSONAL_CACHE, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER, PUBLIC_CACHE_PREFIX, PUBLIC_MANIFEST_KEY, UNSAVED_IMAGE_TIMEOUT_MS } from './web/offline/policy.js';
 
 const origin = 'https://gunnmap.test';
 const shell = '<!doctype html><div id="root">installed app shell</div>';
@@ -42,6 +42,7 @@ function defaultNetwork(request: Request): Promise<Response> {
   }
   if (url.pathname === '/api/render') return Promise.resolve(Response.json({ image_url: imagePath }));
   if (url.pathname.endsWith('.png')) return Promise.resolve(new Response(png, { headers: { 'Content-Type': 'image/png' } }));
+  if (url.pathname.endsWith('.webp')) return Promise.resolve(new Response('compressed map', { headers: { 'Content-Type': 'image/webp' } }));
   return Promise.resolve(new Response(`public asset: ${url.pathname}`));
 }
 
@@ -50,6 +51,9 @@ function workerHarness() {
   const networkRequests: Request[] = [];
   const messages: string[] = [];
   const writes: { name: string; key: string }[] = [];
+  const reads: { name: string; key: string }[] = [];
+  let nextTimer = 0;
+  const timers = new Map<number, {callback: () => void; delay: number}>();
   let claims = 0, skips = 0;
   const fetchFromNetwork = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request && !init ? input : new BrowserRequest(input, init);
@@ -59,7 +63,10 @@ function workerHarness() {
   class MemoryCache {
     private entries = new Map<string, Response>();
     constructor(readonly name: string) {}
-    async match(key: CacheKey) { return this.entries.get(keyFor(key))?.clone(); }
+    async match(key: CacheKey) {
+      reads.push({ name: this.name, key: keyFor(key) });
+      return this.entries.get(keyFor(key))?.clone();
+    }
     async put(key: CacheKey, response: Response) {
       writes.push({ name: this.name, key: keyFor(key) });
       this.entries.set(keyFor(key), response.clone());
@@ -101,7 +108,13 @@ function workerHarness() {
   };
   vm.runInNewContext(workerCode, {
     self: worker, caches, fetch: fetchFromNetwork,
-    Request: BrowserRequest, Response, Headers, URL, console,
+    Request: BrowserRequest, Response, Headers, URL, console, AbortController,
+    setTimeout(callback: () => void, delay: number) {
+      assert.ok([NETWORK_GET_TIMEOUT_MS, UNSAVED_IMAGE_TIMEOUT_MS].includes(delay), 'only bounded GETs should schedule this timer');
+      timers.set(++nextTimer, {callback, delay});
+      return nextTimer;
+    },
+    clearTimeout(id: number) { timers.delete(id); },
   }, { filename: 'dist/web/sw.js' });
 
   async function lifecycle(type: 'install' | 'activate' | 'message', data?: unknown) {
@@ -130,7 +143,10 @@ function workerHarness() {
     return result;
   }
   return {
-    caches, networkRequests, messages, writes, lifecycle, dispatchFetch,
+    caches, networkRequests, messages, writes, reads, lifecycle, dispatchFetch,
+    expireTimeouts() { for (const [id, {callback}] of [...timers]) { timers.delete(id); callback(); } },
+    get timerCount() { return timers.size; },
+    get timerDelays() { return [...timers.values()].map(timer => timer.delay); },
     setNetwork(handler: Network) { network = handler; },
     offline() { network = async () => { throw new TypeError('Failed to fetch'); }; },
     online() { network = defaultNetwork; },
@@ -198,6 +214,7 @@ test('a failed precache leaves the previous worker resources available', async (
   assert.equal(await (await (await h.caches.open(oldName)).match('/'))?.text(), 'working shell');
   assert.equal(h.claims, 0);
   assert.equal(h.skips, 0);
+  assert.deepEqual(await h.caches.keys(), [oldName], 'an incomplete release must be removed entirely');
 });
 
 test('offline navigation, public assets and room lookup preserve geometry and evacuation details', async () => {
@@ -210,7 +227,8 @@ test('offline navigation, public assets and room lookup preserve geometry and ev
     assert.equal(await response.text(), shell);
   }
   assert.deepEqual(await (await h.fetch('/api/offline-rooms')).json(), directory);
-  assert.deepEqual(Buffer.from(await (await h.fetch('/map.png')).arrayBuffer()), png);
+  assert.equal(await (await h.fetch('/map.webp')).text(), 'compressed map');
+  assert.equal(await (await h.fetch('/evacuation-map.webp')).text(), 'compressed map');
   for (const query of ['n—214', 'Ｎ－２１４', 'R 148', 'library', 'K6', 'E01', 'unknown']) {
     const response = await h.fetch(`/api/room-lookup?q=${encodeURIComponent(query)}`);
     assert.equal(response.status, 200, query);
@@ -326,4 +344,181 @@ test('a real successful network request sends ONLINE after an earlier connection
   h.online();
   assert.equal((await h.fetch('/api/room-lookup?q=N214')).status, 200);
   assert.equal(h.messages.at(-1), 'GUNNMAP_ONLINE');
+});
+
+async function seedPreviousRelease(h: ReturnType<typeof workerHarness>, changes: string[] = []) {
+  await h.lifecycle('install');
+  const current = await h.publicCache();
+  const previous = await h.caches.open(PUBLIC_CACHE_PREFIX + 'previous-manifest-release');
+  for (const key of await current.keys()) await previous.put(key, (await current.match(key))!);
+  const manifest = await (await previous.match(PUBLIC_MANIFEST_KEY))!.json() as {url: string; revision: string}[];
+  for (const entry of manifest) if (changes.includes(entry.url)) entry.revision = 'previous-revision';
+  await previous.put(PUBLIC_MANIFEST_KEY, Response.json(manifest));
+  await h.caches.delete(current.name);
+  h.networkRequests.length = 0;
+  return previous;
+}
+
+test('upgrades reuse unchanged maps and scripts but download changed resources and API revisions', async () => {
+  const h = workerHarness();
+  const previous = await seedPreviousRelease(h, ['/main.js', '/api/offline-rooms']);
+  await previous.put('/main.js', new Response('old script'));
+  await previous.put('/api/offline-rooms', Response.json({...directory, rooms: [locatedRooms[0]]}));
+  await h.lifecycle('install');
+  assert.deepEqual(h.networkRequests.map(request => new URL(request.url).pathname).sort(), ['/api/offline-rooms', '/main.js']);
+  assert.ok((await h.caches.keys()).includes(previous.name), 'old release is retained until activation');
+  await h.lifecycle('activate');
+  const cache = await h.publicCache();
+  assert.equal(await (await cache.match('/map.webp'))?.text(), 'compressed map');
+  assert.equal(await (await cache.match('/evacuation-map.webp'))?.text(), 'compressed map');
+  assert.deepEqual(await (await cache.match('/api/offline-rooms'))?.json(), directory);
+  assert.notEqual(await (await cache.match('/main.js'))?.text(), 'old script');
+  assert.ok(await cache.match(PUBLIC_MANIFEST_KEY), 'only a completed release gets reuse metadata');
+});
+
+test('upgrades redownload corrupt directory entries and failed changed resources cannot activate partially', async () => {
+  const h = workerHarness();
+  const previous = await seedPreviousRelease(h, ['/main.js']);
+  await previous.put('/api/offline-rooms', new Response('{broken JSON'));
+  h.setNetwork(async request => new URL(request.url).pathname === '/main.js'
+    ? new Response('Unavailable', {status: 503}) : defaultNetwork(request));
+  await assert.rejects(h.lifecycle('install'), /Precache download failed/);
+  assert.deepEqual(h.networkRequests.map(request => new URL(request.url).pathname).sort(), ['/api/offline-rooms', '/main.js']);
+  assert.deepEqual(await h.caches.keys(), [previous.name]);
+  assert.equal(await (await previous.match('/map.webp'))?.text(), 'compressed map');
+  assert.equal(h.claims, 0);
+  assert.equal(h.skips, 0);
+});
+
+test('slow personal images and room lookups abort and fall back without late ONLINE messages', async () => {
+  const h = await installedWorker();
+  await (await h.caches.open(PERSONAL_CACHE)).put(PERSONAL_IMAGE_KEY, new Response(png, {
+    headers: {'Content-Type': 'image/png', [PERSONAL_SOURCE_HEADER]: imagePath},
+  }));
+  const resolveLate: ((response: Response) => void)[] = [];
+  const requests: Request[] = [];
+  h.setNetwork(request => {
+    requests.push(request);
+    return new Promise<Response>(resolve => { resolveLate.push(resolve); });
+  });
+  const imageResult = h.fetch(imagePath, {credentials: 'include'});
+  const roomResult = h.fetch('/api/room-lookup?q=library', {credentials: 'include'});
+  for (let turn = 0; h.timerCount < 2 && turn < 20; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.timerCount, 2);
+  assert.deepEqual(h.timerDelays, [NETWORK_GET_TIMEOUT_MS, NETWORK_GET_TIMEOUT_MS]);
+  h.expireTimeouts();
+  const [image, room] = await Promise.all([imageResult, roomResult]);
+  assert.equal(image.status, 200);
+  assert.equal(room.headers.get('X-GunnMap-Offline'), '1');
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
+  assert.equal(h.timerCount, 0);
+  assert.ok(requests.every(request => request.signal.aborted && request.credentials === 'omit'));
+  assert.equal(h.messages.at(-1), 'GUNNMAP_OFFLINE');
+  const messageCount = h.messages.length;
+  resolveLate[0](new Response(png, {headers: {'Content-Type': 'image/png'}}));
+  resolveLate[1](Response.json(directory));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.messages.length, messageCount, 'a late response from an aborted probe must not report recovery');
+  h.online();
+  await h.fetch('/api/room-lookup?q=library');
+  assert.equal(h.messages.at(-1), 'GUNNMAP_ONLINE');
+  assert.equal(h.timerCount, 0, 'successful requests clear their deadline timers');
+});
+
+test('a stalled response body is bounded and an older failure cannot replace a newer ONLINE state', async () => {
+  const h = await installedWorker();
+  let finishBody: (() => void) | undefined;
+  const requests: Request[] = [];
+  h.setNetwork(request => {
+    requests.push(request);
+    return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { finishBody = () => {controller.enqueue(new TextEncoder().encode('{}')); controller.close();}; },
+    }), {headers: {'Content-Type': 'application/json'}}));
+  });
+  const slowResult = h.fetch('/api/room-lookup?q=library');
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.timerCount, 1, 'the deadline remains active while the response body stalls');
+  h.online();
+  assert.equal((await h.fetch('/api/room-lookup?q=K4')).status, 200);
+  assert.equal(h.messages.at(-1), 'GUNNMAP_ONLINE');
+  const messageCount = h.messages.length;
+  h.expireTimeouts();
+  assert.equal((await slowResult).headers.get('X-GunnMap-Offline'), '1');
+  assert.ok(requests[0].signal.aborted);
+  assert.equal(h.messages.length, messageCount, 'older failed requests must not overwrite newer successful connectivity');
+  finishBody!();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.messages.length, messageCount);
+  assert.equal(h.timerCount, 0);
+});
+
+test('render POST is sent once without the GET timeout or any automatic retry', async () => {
+  const h = await installedWorker();
+  let complete: ((response: Response) => void) | undefined;
+  let attempts = 0;
+  h.setNetwork(async () => { attempts++; return new Promise<Response>(resolve => {complete = resolve;}); });
+  const pending = h.fetch('/api/render', {method: 'POST', body: '{}'});
+  assert.equal(attempts, 1);
+  assert.equal(h.timerCount, 0);
+  h.expireTimeouts();
+  complete!(Response.json({image_url: imagePath}));
+  assert.equal((await pending).status, 200);
+  assert.equal(attempts, 1);
+});
+
+test('directory reads are parsed once per worker and concurrent repair requests are deduplicated', async () => {
+  const h = await installedWorker();
+  const cache = await h.publicCache();
+  await cache.delete('/api/offline-rooms');
+  h.offline();
+  assert.equal((await h.fetch('/api/room-lookup?q=library')).status, 503);
+  const readsAfterMissing = h.reads.length;
+  let finishRepair: ((response: Response) => void) | undefined;
+  let repairs = 0;
+  h.setNetwork(request => {
+    if (new URL(request.url).pathname === '/api/offline-rooms') {
+      repairs++;
+      return new Promise<Response>(resolve => {finishRepair = resolve;});
+    }
+    return defaultNetwork(request);
+  });
+  const lookups = [h.fetch('/api/room-lookup?q=library'), h.fetch('/api/room-lookup?q=K4')];
+  for (let turn = 0; !finishRepair && turn < 20; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  assert.ok(finishRepair);
+  assert.equal(repairs, 1);
+  finishRepair(Response.json(directory));
+  await Promise.all(lookups);
+  h.offline();
+  for (const query of ['library', 'K4', 'A101']) {
+    assert.equal((await h.fetch(`/api/room-lookup?q=${query}`)).headers.get('X-GunnMap-Offline'), '1');
+  }
+  assert.equal(h.reads.length, readsAfterMissing, 'the repaired validated object is reused without reparsing CacheStorage');
+  assert.equal(h.timerCount, 0);
+});
+
+test('a first image download gets a longer bounded deadline and is never automatically retried', async () => {
+  const h = await installedWorker();
+  const requests: Request[] = [];
+  h.setNetwork(request => {requests.push(request); return new Promise<Response>(() => {});});
+  const pending = h.fetch(imagePath);
+  for (let turn = 0; !h.timerCount && turn < 20; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(h.timerDelays, [UNSAVED_IMAGE_TIMEOUT_MS]);
+  h.expireTimeouts();
+  assert.equal((await pending).status, 503);
+  assert.equal(requests.length, 1);
+  assert.ok(requests[0].signal.aborted);
+  assert.equal(h.timerCount, 0);
+});
+
+test('reinstalling the same resource version reuses existing resources and preserves them if repair fails', async () => {
+  const h = await installedWorker();
+  const cache = await h.publicCache();
+  h.networkRequests.length = 0;
+  h.offline();
+  await h.lifecycle('install');
+  assert.equal(h.networkRequests.length, 0, 'a toolchain-only worker update can reuse the complete current resource version');
+  await cache.delete('/main.js');
+  await assert.rejects(h.lifecycle('install'), /Failed to fetch/);
+  assert.equal(await (await cache.match('/'))?.text(), shell);
+  assert.equal((await h.caches.keys()).includes(cache.name), true, 'a failed repair cannot delete the active cache');
 });

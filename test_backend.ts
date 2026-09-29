@@ -169,8 +169,8 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   for (const body of invalidBodies) {
    assert.equal((await post(body)).status, 400);
   }
-  assert.equal((await fetch(base+'/api/render',{method:'POST',body:'{'})).status,400);
-  assert.equal((await fetch(base+'/api/render',{method:'POST',body:'x'.repeat(16001)})).status,400);
+  assert.equal((await fetch(base+'/api/render',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})).status,400);
+  assert.equal((await fetch(base+'/api/render',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(16001)})).status,400);
   const staticPaths = [
    '/',
    '/main.js',

@@ -40,11 +40,12 @@ const deferred = <T,>() => {
 const response = (body: unknown, ok = true) => ({ ok, json: async () => body }) as Response;
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 let allowCookieWrites = true;
+const cookieWrites: string[] = [];
 const cookieDescriptor = Object.getOwnPropertyDescriptor(dom.window.Document.prototype, "cookie")!;
 Object.defineProperty(dom.window.document, "cookie", {
   configurable: true,
   get: () => cookieDescriptor.get!.call(dom.window.document) as string,
-  set: (value: string) => { if (allowCookieWrites) cookieDescriptor.set!.call(dom.window.document, value); },
+  set: (value: string) => { cookieWrites.push(value); if (allowCookieWrites) cookieDescriptor.set!.call(dom.window.document, value); },
 });
 
 async function harness(options: { draft?: Period[]; shared?: Period[]; legacy?: Period[]; legacyTemplates?: ScheduleTemplate[]; blocked?: boolean } = {}) {
@@ -66,6 +67,7 @@ async function harness(options: { draft?: Period[]; shared?: Period[]; legacy?: 
     decode() { return io.decode(); }
   } });
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (url: string, init?: RequestInit) => {
+    assert.equal(init?.credentials, "omit", "public room and render requests must not carry the local draft cookie");
     if (url === "/api/rooms") return response({ rooms: inventory.map(room => ({ ...room, floor: room.floor ?? 1, aliases: room.aliases ?? [] })), buildings });
     assert.equal(url, "/api/render");
     const periods = (JSON.parse(String(init?.body)) as { periods: Period[] }).periods;
@@ -304,7 +306,7 @@ test("replacing a same-name template can be undone without changing the current 
 test("building changes preserve room text and Auto-detect submits the recognized building", async () => {
   const h = await harness({ draft: schedule("N214") });
   try {
-    const select = h.get<HTMLElement & { value: string }>('wa-select[aria-label="Period 1 building"]');
+    const select = h.get<HTMLSelectElement>('select[aria-label="Period 1 building"]');
     await act(async () => {
       select.value = "M";
       select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
@@ -418,4 +420,87 @@ test("shared preview and generated-map schedule survive route changes when sessi
     storagePrototype.removeItem = originalRemove;
     await h.close();
   }
+});
+
+test("mobile building controls are mounted on request and continue to support manual selection", async () => {
+  const original = dom.window.matchMedia;
+  Object.defineProperty(dom.window, "matchMedia", { configurable: true, value: () => ({
+    matches: false, addEventListener() {}, removeEventListener() {},
+  }) });
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    assert.equal(document.querySelectorAll('.field-building select').length, 0);
+    assert.equal(document.querySelectorAll('wa-select, wa-color-picker').length, 0);
+    await h.click("Choose buildings manually");
+    assert.equal(document.querySelectorAll('.field-building select').length, 7);
+    const select = h.get<HTMLSelectElement>('select[aria-label="Period 1 building"]');
+    await act(async () => { select.value = "N"; select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+    assert.equal(storage.readCurrentSchedule()[0].building, "N");
+    await h.click("Hide building choices");
+    assert.equal(document.querySelectorAll('.field-building select').length, 0);
+    assert.equal(storage.readCurrentSchedule()[0].building, "N");
+  } finally { await h.close(); Object.defineProperty(dom.window, "matchMedia", { configurable: true, value: original }); }
+});
+
+test("one on-demand color dialog edits the selected period without submitting the schedule", async () => {
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    assert.equal(document.querySelectorAll('.color-editor').length, 0);
+    assert.equal(document.querySelectorAll('.period-color-trigger').length, 7);
+    await h.clickLabel("Period 2 color");
+    await act(async () => { await import("./web/src/features/schedule/ColorEditor.js"); await tick(); });
+    const dialog = document.querySelector<HTMLDialogElement>('.color-editor');
+    assert.ok(dialog?.open);
+    assert.equal(dialog.closest('form'), null, "the modal must not nest a form inside the schedule form");
+    const color = storage.PERIOD_COLORS[4];
+    await act(async () => { dialog.querySelector<HTMLButtonElement>(`button[aria-label="Use ${color}"]`)!.click(); });
+    await act(async () => { dialog.querySelector('form')!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); await tick(); });
+    assert.equal(storage.readCurrentSchedule()[1].color, color);
+    assert.equal(h.requests.length, 0, "applying a color must not generate a map");
+    assert.equal(document.querySelectorAll('.color-editor').length, 0);
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "Period 2 color");
+    await h.clickLabel("Undo");
+    assert.equal(storage.readCurrentSchedule()[1].color, storage.PERIOD_COLORS[1]);
+  } finally { await h.close(); }
+});
+
+test("typing coalesces cookie writes and navigation and pagehide flush the latest draft", async () => {
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    cookieWrites.length = 0;
+    await h.input("A");
+    await h.input("A1");
+    await h.input("A134");
+    assert.equal(cookieWrites.length, 0, "typing must not synchronously write cookies");
+    assert.equal(storage.loadDraft()![0].room, "A134", "Undo and other actions see the pending draft");
+    assert.equal((h.cookie(storage.DRAFT_COOKIE_NAME) as {periods: Period[]}).periods[0].room, "M3");
+    await h.route("/other");
+    assert.equal(cookieWrites.length, 1);
+    assert.equal((h.cookie(storage.DRAFT_COOKIE_NAME) as {periods: Period[]}).periods[0].room, "A134");
+    await h.route("/");
+    await h.input("L1");
+    await act(async () => { dom.window.dispatchEvent(new dom.window.Event("pagehide")); });
+    assert.equal((h.cookie(storage.DRAFT_COOKIE_NAME) as {periods: Period[]}).periods[0].room, "L1");
+    await h.input("M3");
+    await h.click("Clear Schedule");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 280)); });
+    assert.equal(h.cookie(storage.DRAFT_COOKIE_NAME), null, "a pending write must not resurrect a cleared draft");
+  } finally { await h.close(); }
+});
+
+test("debounced drafts persist once after typing and Secure is used only over HTTPS", async () => {
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    cookieWrites.length = 0;
+    await h.input("A134");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 280)); });
+    assert.equal(cookieWrites.length, 1);
+    assert.equal((h.cookie(storage.DRAFT_COOKIE_NAME) as {periods: Period[]}).periods[0].room, "A134");
+    assert.doesNotMatch(cookieWrites[0], /; Secure/);
+    dom.reconfigure({ url: "https://localhost/" });
+    assert.equal(storage.saveDraft(schedule("L1")), true);
+    assert.match(cookieWrites.at(-1)!, /; SameSite=Lax; Secure/);
+    assert.equal(storage.saveTemplates([{ name: "Monday", periods: schedule("L1") }]), true);
+    assert.match(cookieWrites.at(-1)!, /; SameSite=Lax; Secure/);
+  } finally { await h.close(); dom.reconfigure({ url: "http://localhost/" }); }
 });

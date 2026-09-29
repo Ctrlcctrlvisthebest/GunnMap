@@ -1,21 +1,20 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
-import { gzip } from 'node:zlib';
 import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
 import { findRoomMatches } from './src/domain/room-matching.js';
 import { evacuationDataIssues, evacuationForRoom, evacuationOverview } from './evacuation.js';
 import { renderRooms, xml } from './map_highlighter.js';
 import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_CLEANUP_INTERVAL_MS, removeExpiredMap, validateRetentionMs } from './output_retention.js';
+import { PublicResponseCache } from './http_cache.js';
+import { GeneratedMapStore, DEFAULT_MAP_STORAGE_BYTES, DEFAULT_MAP_MAX_BYTES } from './generated_map_store.js';
+import { assertRenderRequest, configuredInteger, HttpError, normalizePublicOrigin, RenderQueue, RenderRateLimiter, setSecurityHeaders } from './server_policy.js';
 export { resolveRoom } from './project.js';
 class InputError extends Error {}
 interface LegendItem { period: number; label: string; floor: number; color: string }
 const REVALIDATE_STATIC = 'no-cache';
-const compressGzip = promisify(gzip);
 
 const evacuationIssues = evacuationDataIssues();
 if (evacuationIssues.length) {
@@ -54,7 +53,7 @@ async function addScheduleLegend(image: Buffer, selected: LegendItem[]): Promise
     .toBuffer();
 }
 
-export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'output')) {
+export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'output'), options: { store?: GeneratedMapStore; signal?: AbortSignal } = {}) {
   if (!Array.isArray(periods) || periods.length !== 7) throw new InputError('Please submit all seven period slots');
   const colors: Record<string, string[]> = {};
   const selected = [];
@@ -105,18 +104,15 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
     }
   }
 
-  const highlighted = await renderRooms(colors, { opacity: 0.55 });
-  const bytes = await addScheduleLegend(highlighted, selected);
-  await mkdir(outputDir, { recursive: true });
-  const id = randomUUID().replaceAll('-', '');
-  const filename = `period_map_${id}.png`;
-  const temporary = resolve(outputDir, `.${filename}.tmp`);
+  const store = options.store ?? new GeneratedMapStore(outputDir, DEFAULT_MAP_STORAGE_BYTES, DEFAULT_MAP_MAX_BYTES, configuredRetentionMs());
+  const reservation = await store.reserve();
+  let filename: string;
   try {
-    await writeFile(temporary, bytes, { flag: 'wx' });
-    await rename(temporary, resolve(outputDir, filename));
-  } finally {
-    await rm(temporary, { force: true });
-  }
+    if (options.signal?.aborted) throw new HttpError(503, 'Map request was cancelled');
+    const highlighted = await renderRooms(colors, { opacity: 0.55 });
+    const bytes = await addScheduleLegend(highlighted, selected);
+    filename = await reservation.write(bytes, options.signal);
+  } finally { reservation.release(); }
 
   return { image_url: `/output/${filename}`, selected, warnings, map_size: roomData.image_size };
 }
@@ -135,63 +131,16 @@ function send(
   res.end(body);
 }
 
-function encodingQualities(header: string | undefined) {
-  const encodings = new Map<string, number>();
-  for (const token of header?.split(',') ?? []) {
-    const [name, ...parameters] = token.trim().toLowerCase().split(';');
-    const qualityParameter = parameters.map(value => value.trim()).find(value => value.startsWith('q='));
-    const quality = qualityParameter === undefined ? 1 : Number(qualityParameter.slice(2));
-    encodings.set(name, Number.isFinite(quality) && quality >= 0 && quality <= 1 ? quality : 0);
-  }
-  return {
-    gzip: encodings.get('gzip') ?? encodings.get('*') ?? 0,
-    identity: encodings.get('identity') ?? (encodings.get('*') === 0 ? 0 : 1),
-  };
-}
-
-async function sendCached(
-  req: IncomingMessage,
-  res: ServerResponse,
-  body: Buffer,
-  type: string,
-  cacheControl = REVALIDATE_STATIC,
-  extraHeaders: Record<string, string> = {},
-) {
-  const text = /^(?:text\/|application\/(?:json|javascript|manifest\+json)|image\/svg\+xml)/.test(type);
-  const quality = encodingQualities(req.headers['accept-encoding']);
-  const useGzip = text && quality.gzip > 0 && quality.gzip >= quality.identity && (body.length >= 1024 || quality.identity === 0);
-  if (!useGzip && quality.identity === 0) {
-    res.setHeader('Vary', 'Accept-Encoding');
-    return send(res, 406, JSON.stringify({ error: 'No acceptable content encoding' }));
-  }
-  const representation = useGzip ? await compressGzip(body) : body;
-  const etag = `"${createHash('sha256').update(representation).digest('base64url')}"`;
-  const headers = {
-    'Content-Type': type,
-    'Cache-Control': cacheControl,
-    ETag: etag,
-    ...(text ? { Vary: 'Accept-Encoding' } : {}),
-    ...(useGzip ? { 'Content-Encoding': 'gzip' } : {}),
-    ...extraHeaders,
-  };
-  const validators = req.headers['if-none-match']?.split(',').map(value => value.trim().replace(/^W\//, ''));
-  if (validators?.some(value => value === '*' || value === etag)) {
-    res.writeHead(304, headers);
-    res.end();
-    return;
-  }
-  res.writeHead(200, {
-    ...headers,
-    'Content-Length': representation.length,
-  });
-  res.end(representation);
-}
 async function payload(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of req) {
+  if (Number(req.headers['content-length']) > 16000) {
+    req.resume();
+    throw new InputError('Request is empty or too large');
+  }
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > 16000) throw new InputError('Request is empty or too large');
+    if (size > 16000) { req.resume(); throw new InputError('Request is empty or too large'); }
     chunks.push(chunk);
   }
   if (!size) {
@@ -204,9 +153,39 @@ async function payload(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-export interface AppOptions { retentionMs?: number; cleanupIntervalMs?: number }
+export interface AppOptions {
+  retentionMs?: number; cleanupIntervalMs?: number;
+  renderRateLimit?: number; renderRateWindowMs?: number; renderRateClients?: number;
+  renderConcurrency?: number; renderQueueLimit?: number; renderQueueTimeoutMs?: number;
+  mapStorageBytes?: number; mapMaxBytes?: number;
+  publicOrigin?: string; hsts?: boolean;
+}
 export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptions = {}) {
   const retentionMs = validateRetentionMs(options.retentionMs ?? configuredRetentionMs());
+  const integer = (value: number | undefined, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER) => {
+    const resolved = value ?? configuredInteger(name, fallback, minimum, maximum);
+    if (!Number.isSafeInteger(resolved) || resolved < minimum || resolved > maximum) throw new Error(name + ' is outside the supported range');
+    return resolved;
+  };
+  const rateLimiter = new RenderRateLimiter(
+    integer(options.renderRateLimit, 'RENDER_RATE_LIMIT', 60),
+    integer(options.renderRateWindowMs, 'RENDER_RATE_WINDOW_MS', 60_000, 1, 2 ** 31 - 1),
+    integer(options.renderRateClients, 'RENDER_RATE_CLIENTS', 10_000),
+  );
+  const renderQueue = new RenderQueue(
+    integer(options.renderConcurrency, 'RENDER_CONCURRENCY', 2),
+    integer(options.renderQueueLimit, 'RENDER_QUEUE_LIMIT', 8, 0),
+    integer(options.renderQueueTimeoutMs, 'RENDER_QUEUE_TIMEOUT_MS', 10_000, 1, 2 ** 31 - 1),
+  );
+  const mapStorageBytes = integer(options.mapStorageBytes, 'MAP_STORAGE_BYTES', DEFAULT_MAP_STORAGE_BYTES);
+  const mapMaxBytes = integer(options.mapMaxBytes, 'MAP_MAX_BYTES', DEFAULT_MAP_MAX_BYTES);
+  if (mapMaxBytes > mapStorageBytes) throw new Error('MAP_MAX_BYTES must not exceed MAP_STORAGE_BYTES');
+  const mapStore = new GeneratedMapStore(outputDir, mapStorageBytes, mapMaxBytes, retentionMs);
+  const publicOrigin = normalizePublicOrigin(options.publicOrigin ?? process.env.PUBLIC_ORIGIN);
+  if (process.env.ENABLE_HSTS !== undefined && !['true', 'false'].includes(process.env.ENABLE_HSTS)) throw new Error('ENABLE_HSTS must be true or false');
+  const hsts = options.hsts ?? process.env.ENABLE_HSTS === 'true';
+  if (hsts && !publicOrigin?.startsWith('https://')) throw new Error('ENABLE_HSTS requires an explicit HTTPS PUBLIC_ORIGIN');
+  const publicCache = new PublicResponseCache();
   const cleanupIntervalMs = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
   if (!Number.isFinite(cleanupIntervalMs) || cleanupIntervalMs <= 0 || cleanupIntervalMs > 2 ** 31 - 1) {
     throw new Error('Cleanup interval must be between 1 and 2147483647 milliseconds');
@@ -233,30 +212,38 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
   // synchronous image provenance check on every public API request.
   const evacuationDirectory = Buffer.from(JSON.stringify(evacuationOverview()));
   const server = createServer(async (req, res) => {
+    setSecurityHeaders(res, hsts);
     try {
       const requestUrl = new URL(req.url ?? '/', 'http://localhost');
       const pathname = requestUrl.pathname;
 
       if (req.method === 'POST' && pathname === '/api/render') {
+        assertRenderRequest(req, publicOrigin);
+        rateLimiter.consume(req.socket.remoteAddress ?? 'unknown');
         const body = await payload(req);
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
           throw new InputError('Invalid request object');
         }
-        const result = await renderPeriods(
-          (body as { periods?: unknown }).periods,
-          outputDir,
-        );
-        return send(res, 200, JSON.stringify(result));
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.on('close', abort);
+        try {
+          const result = await renderQueue.run(() => renderPeriods(
+            (body as { periods?: unknown }).periods, outputDir, { store: mapStore, signal: controller.signal },
+          ), controller.signal);
+          if (!res.destroyed) return send(res, 200, JSON.stringify(result));
+          return;
+        } finally { res.off('close', abort); }
       }
       if (req.method !== 'GET') {
         const status = req.method === 'POST' ? 404 : 405;
         return send(res, status, JSON.stringify({ error: 'Not found' }));
       }
       if (pathname === '/api/rooms') {
-        return await sendCached(req, res, roomDirectory, 'application/json; charset=utf-8');
+        return await publicCache.send(req, res, publicCache.buffer('rooms', roomDirectory), 'application/json; charset=utf-8');
       }
       if (pathname === '/api/offline-rooms') {
-        return await sendCached(req, res, offlineRoomDirectory, 'application/json; charset=utf-8');
+        return await publicCache.send(req, res, publicCache.buffer('offline-rooms', offlineRoomDirectory), 'application/json; charset=utf-8');
       }
       if (pathname === '/api/room-lookup') {
         const query = requestUrl.searchParams.get('q')?.trim() ?? '';
@@ -265,7 +252,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         return send(res, 200, JSON.stringify({ rooms: matches, map_size: roomData.image_size }));
       }
       if (pathname === '/api/evacuation-data') {
-        return await sendCached(req, res, evacuationDirectory, 'application/json; charset=utf-8');
+        return await publicCache.send(req, res, publicCache.buffer('evacuation-data', evacuationDirectory), 'application/json; charset=utf-8');
       }
       if (pathname === '/favicon.ico') {
         res.writeHead(204);
@@ -290,6 +277,8 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         '/apple-touch-icon.png': ['web/apple-touch-icon.png', 'image/png'],
         '/pwa-icon-192.png': ['web/pwa-icon-192.png', 'image/png'],
         '/pwa-icon-512.png': ['web/pwa-icon-512.png', 'image/png'],
+        '/map.webp': ['dist/web/map.webp', 'image/webp'],
+        '/evacuation-map.webp': ['dist/web/evacuation-map.webp', 'image/webp'],
         '/map.png': ['src/map/gunn_site_map.png', 'image/png'],
         '/evacuation-map.png': ['src/map/gunn_evacuation_map.png', 'image/png'],
       };
@@ -302,7 +291,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         file = [resolve(outputDir, generatedMap[1]), 'image/png'];
       }
 
-      const assetPath = pathname.match(/^\/assets\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:js|css|woff2|woff|svg|png)$/);
+      const assetPath = pathname.match(/^\/assets\/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(?:js|css|woff2|woff|svg|png|webp)$/);
       if (assetPath) {
         const extension = pathname.slice(pathname.lastIndexOf('.') + 1);
         const contentTypes: Record<string, string> = {
@@ -312,6 +301,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
           woff: 'font/woff',
           svg: 'image/svg+xml',
           png: 'image/png',
+          webp: 'image/webp',
         };
         file = [`dist/web/${pathname.slice(1)}`, contentTypes[extension]];
         if (/-[A-Za-z0-9_-]{8,}\./.test(pathname)) {
@@ -323,10 +313,10 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         return send(res, 404, JSON.stringify({ error: 'Not found' }));
       }
       try {
-        const bytes = await readFile(resolve(ROOT, file[0]));
-        if (generatedMap) return send(res, 200, bytes, file[1]);
+        const path = resolve(ROOT, file[0]);
+        if (generatedMap) return send(res, 200, await readFile(path), file[1]);
         const extraHeaders: Record<string, string> = pathname === '/sw.js' ? { 'Service-Worker-Allowed': '/' } : {};
-        return await sendCached(req, res, bytes, file[1], cacheControl, extraHeaders);
+        return await publicCache.send(req, res, await publicCache.file(path), file[1], cacheControl, extraHeaders);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
           return send(res, 404, JSON.stringify({ error: 'Not found' }));
@@ -335,14 +325,18 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
       }
     } catch (error) {
       if (!res.headersSent) {
-        const status = error instanceof InputError ? 400 : 500;
-        const message = error instanceof InputError ? error.message : 'Unable to generate map';
-        send(res, status, JSON.stringify({ error: message }));
+        const status = error instanceof HttpError ? error.status : error instanceof InputError ? 400 : 500;
+        const message = error instanceof InputError || error instanceof HttpError ? error.message : 'Unable to generate map';
+        if (error instanceof HttpError && error.retryAfter !== undefined) res.setHeader('Retry-After', error.retryAfter);
+        if (!res.destroyed) send(res, status, JSON.stringify({ error: message }));
       }
       else res.end();
-      if (!(error instanceof InputError)) console.error(error);
+      if (!(error instanceof InputError) && !(error instanceof HttpError)) console.error(error);
     }
   });
+  server.headersTimeout = 10_000;
+  server.requestTimeout = 15_000;
+  server.keepAliveTimeout = 5_000;
   let timer: NodeJS.Timeout | undefined;
   let cleaning: Promise<unknown> | undefined;
   const cleanup = () => {

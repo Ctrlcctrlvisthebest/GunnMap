@@ -4,26 +4,40 @@ import { resolve } from 'node:path';
 import { build } from 'vite';
 
 const root = process.cwd();
-const assets = ['/', '/main.js', '/ui.css', '/style.css', '/map.png', '/evacuation-map.png',
-  '/api/rooms', '/api/offline-rooms', '/api/evacuation-data', '/manifest.webmanifest',
-  '/icon.svg', '/apple-touch-icon.png', '/pwa-icon-192.png', '/pwa-icon-512.png'];
-const version = createHash('sha256');
+const resources: Record<string, string[]> = {
+  '/': ['web/index.html', 'server_policy.ts', 'web_app.ts'],
+  '/main.js': ['dist/web/main.js'],
+  '/ui.css': ['dist/web/ui.css'],
+  '/style.css': ['web/style.css'],
+  '/map.webp': ['dist/web/map.webp'],
+  '/evacuation-map.webp': ['dist/web/evacuation-map.webp'],
+  '/manifest.webmanifest': ['web/manifest.webmanifest'],
+  '/icon.svg': ['web/icon.svg'],
+  '/apple-touch-icon.png': ['web/apple-touch-icon.png'],
+  '/pwa-icon-192.png': ['web/pwa-icon-192.png'],
+  '/pwa-icon-512.png': ['web/pwa-icon-512.png'],
+};
+// API revisions include generation/serialization code as well as data. A data-only
+// hash would incorrectly retain old payloads after the API response format changes.
+const apiInputs = ['web_app.ts', 'project.ts', 'room_regions.json', 'evacuation_data.json',
+  'evacuation.ts', 'src/domain/room-matching.ts'];
+for (const path of ['/api/rooms', '/api/offline-rooms', '/api/evacuation-data']) resources[path] = apiInputs;
 for (const name of (await readdir(resolve(root, 'dist/web/assets'))).sort()) {
-  if (!/\.(?:js|css|woff2?|svg|png)$/.test(name)) continue;
-  assets.push(`/assets/${name}`);
-  version.update(name).update(await readFile(resolve(root, 'dist/web/assets', name)));
+  if (/\.(?:js|css|woff2?|svg|png|webp)$/.test(name)) resources[`/assets/${name}`] = [`dist/web/assets/${name}`];
 }
-for (const path of ['dist/web/main.js', 'dist/web/ui.css', 'web/index.html', 'web/style.css',
-  'room_regions.json', 'evacuation_data.json', 'evacuation.ts', 'web_app.ts',
-  'src/map/gunn_site_map.png', 'src/map/gunn_evacuation_map.png', 'web/manifest.webmanifest',
-  'web/icon.svg', 'web/apple-touch-icon.png', 'web/pwa-icon-192.png', 'web/pwa-icon-512.png',
-  'web/offline/sw.ts', 'web/offline/policy.ts', 'src/domain/room-matching.ts']) {
+const manifest = await Promise.all(Object.entries(resources).map(async ([url, inputs]) => {
+  const fingerprint = createHash('sha256');
+  for (const path of inputs) fingerprint.update(path).update('\0').update(await readFile(resolve(root, path))).update('\0');
+  return {url, revision: fingerprint.digest('hex')};
+}));
+const version = createHash('sha256').update(JSON.stringify(manifest));
+for (const path of ['web/offline/sw.ts', 'web/offline/policy.ts', 'src/domain/room-matching.ts']) {
   version.update(path).update(await readFile(resolve(root, path)));
 }
 await build({
   configFile: false,
   publicDir: false,
-  define: {__OFFLINE_VERSION__: JSON.stringify(version.digest('hex').slice(0, 16)), __OFFLINE_ASSETS__: JSON.stringify(assets)},
+  define: {__OFFLINE_VERSION__: JSON.stringify(version.digest('hex').slice(0, 16)), __OFFLINE_MANIFEST__: JSON.stringify(manifest)},
   build: {
     outDir: 'dist/web', emptyOutDir: false,
     rollupOptions: {input: resolve(root, 'web/offline/sw.ts'), output: {entryFileNames: 'sw.js'}},

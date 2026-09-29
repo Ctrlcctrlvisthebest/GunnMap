@@ -23,6 +23,10 @@
 - Schedule drafts and templates use cookies. Every schedule edit or load must invalidate generated map previews, and stale async results must not navigate to an outdated image.
 - Each rendered image has its own URL. Never replace a previous tab's image with another tab's generated map.
 - Personal images use no-store and enter the offline cache only after explicit Save offline. Keep public cache upgrades separate from the saved personal image. `build_offline.ts` builds a versioned worker from `web/offline/`; include new public dependencies in its precache inputs.
+- Build lossless display WebP derivatives with `build_map_assets.ts`; never overwrite the source PNGs. Preserve offline Download PNG by encoding the cached display copy on demand. Keep every displayed map's original pixel dimensions.
+- Public precache revisions are per resource; reuse only matching revisions from complete previous caches. Retain bounded network fallback and atomic cache activation. Personal maps must never enter the public asset manifest.
+- Render requests must pass JSON and same-origin checks, bounded admission and storage reservations before expensive work. Do not trust forwarded client headers implicitly or bypass the generated-image store in HTTP routes.
+- Keep browser scripts compatible with the server CSP. Public API/image fetches omit credentials; JavaScript-readable schedule cookies use Secure on HTTPS while localhost development remains usable.
 - Use v2 draft/template cookies and keep legacy cookies read-only. Temporary shared schedules must stay separate from the local draft until explicitly saved.
 - Keep evacuation assignments grounded in the supplied reference image. Do not infer destinations for unlisted rooms; N214 belongs to the football-field section N201–N217.
 - Put temporary renders in `output/` or a temporary directory; do not commit them unless deliberately named `demo_*.png` for documentation.
