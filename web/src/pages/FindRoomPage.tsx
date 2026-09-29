@@ -31,11 +31,11 @@ export function FindRoomPage() {
         scale: 2,
       }
     : undefined;
-  usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus });
+  const controls = usePanzoom(stage, art, image, { active: Boolean(selectedRoom), focus });
 
   useEffect(() => {
     let current = true;
-    void fetch("/api/rooms")
+    void fetch("/api/rooms", { credentials: "omit" })
       .then(async response => {
         if (!response.ok) throw new Error();
         return await response.json() as RoomData;
@@ -81,7 +81,7 @@ export function FindRoomPage() {
     setSearching(true);
     setMessage("Searching…");
     try {
-      const response = await fetch(`/api/room-lookup?q=${encodeURIComponent(query)}`);
+      const response = await fetch(`/api/room-lookup?q=${encodeURIComponent(query)}`, { credentials: "omit" });
       const result = await response.json() as RoomLookupResponse;
       if (currentRevision !== requestRevision.current) return;
       if (!response.ok) throw new Error(result.error ?? "Room search failed.");
@@ -149,7 +149,7 @@ export function FindRoomPage() {
               label="Room or room alias"
               value={input}
               rooms={rooms}
-              placeholder="e.g. N214 or library"
+              placeholder="e.g. A134 or library"
               onValueChange={handleInputChange}
             />
           </label>
@@ -223,24 +223,37 @@ export function FindRoomPage() {
                 className="download-link"
                 href="/map.png"
                 download="gunn-campus-map.png"
+                onClick={event => {
+                  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  void import("../features/maps/download-public-map.js")
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/map.webp", "gunn-campus-map.png"))
+                    .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
+                }}
               >
                 Download PNG
               </a>
             </div>
-            <p className="map-help">
-              Drag to move · Scroll or pinch to zoom
+            <div className="map-controls" role="group" aria-label="Map zoom">
+              <button type="button" className="download-link" onClick={controls.zoomOut} aria-label="Zoom out">−</button>
+              <button type="button" className="download-link" onClick={controls.zoomIn} aria-label="Zoom in">+</button>
+              <button type="button" className="download-link" onClick={controls.reset}>Reset view</button>
+            </div>
+            <p id="room-map-help" className="map-help">
+              Drag to move · Scroll or pinch to zoom · Focus the map to use +/−, arrow keys or Home.
             </p>
             <div
               ref={stage}
               className="room-locator-stage"
               role="region"
               aria-label="Zoomable campus map"
+              aria-describedby="room-map-help"
               tabIndex={0}
             >
               <div ref={art} className="room-locator-art">
                 <img
                   ref={image}
-                  src="/map.png"
+                  src="/map.webp"
                   alt={`Gunn campus map with ${selectedRoom.label} highlighted`}
                 />
                 <span

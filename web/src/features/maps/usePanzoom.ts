@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import Panzoom from "@panzoom/panzoom";
 import { setBoundedImageTransform } from "./map-pan-bounds.js";
+import { handleMapKeydown } from "./map-keyboard.js";
 
 interface UsePanzoomOptions {
   active: boolean;
@@ -16,6 +17,11 @@ export function usePanzoom(
   image: RefObject<HTMLImageElement | null>,
   { active, fit = false, focus, sourceKey }: UsePanzoomOptions,
 ) {
+  const instanceRef = useRef<ReturnType<typeof Panzoom> | null>(null);
+  const zoomIn = useCallback(() => { instanceRef.current?.zoomIn({ animate: false }); }, []);
+  const zoomOut = useCallback(() => { instanceRef.current?.zoomOut({ animate: false }); }, []);
+  const reset = useCallback(() => { instanceRef.current?.reset({ animate: false }); }, []);
+
   useEffect(() => {
     const viewport = stage.current;
     const artwork = art.current;
@@ -28,6 +34,7 @@ export function usePanzoom(
     const destroyPanzoom = () => {
       if (wheelListener) viewport.removeEventListener("wheel", wheelListener);
       wheelListener = null;
+      if (instanceRef.current === instance) instanceRef.current = null;
       instance?.destroy();
       instance = null;
     };
@@ -53,12 +60,16 @@ export function usePanzoom(
         setTransform: (element, values) => {
           const bounded = setBoundedImageTransform(element as HTMLElement, viewport, values);
           if (bounded.x !== values.x || bounded.y !== values.y) {
-            requestAnimationFrame(() => instance?.pan(bounded.x, bounded.y, { animate: false, relative: false }));
+            const current = instance;
+            requestAnimationFrame(() => {
+              if (instance === current) current?.pan(bounded.x, bounded.y, { animate: false, relative: false });
+            });
           }
         },
         touchAction: "none",
         cursor: "grab",
       });
+      instanceRef.current = instance;
       wheelListener = instance.zoomWithWheel;
       viewport.addEventListener("wheel", wheelListener, { passive: false });
       if (focus && !fit) {
@@ -77,6 +88,10 @@ export function usePanzoom(
       }
     };
 
+    const onKeydown = (event: KeyboardEvent) => {
+      handleMapKeydown(event, viewport, instance);
+    };
+    viewport.addEventListener("keydown", onKeydown);
     if (mapImage.complete && mapImage.naturalWidth) initialize();
     else mapImage.addEventListener("load", initialize, { once: true });
     resizeObserver = new ResizeObserver(() => {
@@ -87,9 +102,12 @@ export function usePanzoom(
     resizeObserver.observe(viewport);
 
     return () => {
+      viewport.removeEventListener("keydown", onKeydown);
       mapImage.removeEventListener("load", initialize);
       resizeObserver?.disconnect();
       destroyPanzoom();
     };
   }, [active, art, fit, focus?.x, focus?.y, focus?.scale, image, sourceKey, stage]);
+
+  return { zoomIn, zoomOut, reset };
 }

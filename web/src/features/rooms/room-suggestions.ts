@@ -1,6 +1,6 @@
 import autoComplete from "@tarekraafat/autocomplete.js";
-import "@tarekraafat/autocomplete.js/dist/css/autoComplete.02.css";
 import { buildingName } from "./room-display.js";
+import { normalizeRoomInput } from "../../../../src/domain/room-matching.js";
 
 export interface RoomSuggestion {
   id: string;
@@ -16,6 +16,7 @@ interface SuggestionOptions {
 }
 
 interface SuggestionRecord {
+  id: string;
   label: string;
   searchText: string;
   building: string;
@@ -26,9 +27,7 @@ interface SelectionDetail {
   selection?: { value?: SuggestionRecord };
 }
 
-function normalize(value: string) {
-  return value.replace(/[\s-]+/g, "").toLowerCase();
-}
+const normalize = normalizeRoomInput;
 
 function humanAliases(room: RoomSuggestion) {
   return (room.aliases ?? []).filter((alias) => !/^R\d{3}$/i.test(alias.trim()));
@@ -54,11 +53,12 @@ function suggestionRecords(rooms: RoomSuggestion[], building: string, input: str
     const locationAlias = aliases.find((alias) => /\blocation\b/i.test(alias));
     const hasDuplicateLabel = (labelCounts.get(normalize(room.label)) ?? 0) > 1;
     const label = hasDuplicateLabel && locationAlias ? locationAlias : room.label;
-    const searchTerms = new Set([room.label, label, ...aliases]);
+    const searchTerms = new Set([room.id, room.label, label, ...aliases]);
     const labelVariant = roomLabelVariant(room.label, input);
     if (labelVariant) searchTerms.add(labelVariant);
 
     return {
+      id: room.id,
       label,
       searchText: [...searchTerms].join(" "),
       building: room.building,
@@ -82,11 +82,12 @@ export function mountRoomSuggestions(
     threshold: 1,
     debounce: 70,
     data: {
-      src: async (query: string) => suggestionRecords(rooms, options.getBuilding?.() ?? "", query),
+      src: async (query: string) => suggestionRecords(rooms, options.getBuilding?.() ?? "", query)
+        .filter(item => normalize(item.searchText).includes(normalize(query))),
       keys: ["searchText"],
       cache: false,
     },
-    searchEngine: "strict",
+    searchEngine: (query: string, record: string) => normalize(record).includes(normalize(query)) ? record : undefined,
     resultsList: {
       id: listId,
       class: "room-suggestion-results",
@@ -98,6 +99,9 @@ export function mountRoomSuggestions(
       class: "room-suggestion-option",
       element: (item: HTMLLIElement, data: { value: unknown }) => {
         const suggestion = data.value as SuggestionRecord;
+        // All seven inputs can retain results; their active-descendant IDs
+        // must identify the suggestion within this input's own list.
+        item.id = `${listId}-${suggestion.id}`;
         const label = document.createElement("span");
         label.className = "room-suggestion-option-label";
         label.textContent = suggestion.label;
@@ -112,6 +116,9 @@ export function mountRoomSuggestions(
   });
 
   const handleInput = () => options.onInput?.(input.value);
+  // autocomplete.js clears its DOM input on Escape with a "clear" event;
+  // publish the same input event so React and the saved schedule stay aligned.
+  const handleClear = () => input.dispatchEvent(new Event("input", { bubbles: true }));
   const handleSelection = (event: Event) => {
     const detail = (event as CustomEvent<SelectionDetail>).detail;
     const selected = detail.selection?.value;
@@ -121,6 +128,7 @@ export function mountRoomSuggestions(
   };
 
   input.addEventListener("input", handleInput);
+  input.addEventListener("clear", handleClear);
   input.addEventListener("selection", handleSelection);
 
   return {
@@ -129,6 +137,7 @@ export function mountRoomSuggestions(
     },
     destroy() {
       input.removeEventListener("input", handleInput);
+      input.removeEventListener("clear", handleClear);
       input.removeEventListener("selection", handleSelection);
       instance.unInit();
       document.getElementById(listId)?.remove();

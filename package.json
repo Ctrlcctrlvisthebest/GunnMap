@@ -4,20 +4,22 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "npm run build:web && node --import tsx web_app.ts",
-    "build:web": "tsc --noEmit -p tsconfig.web.json && vite build",
+    "build:web": "tsc --noEmit -p tsconfig.web.json && tsc -p tsconfig.worker.json && vite build && node --import tsx build_map_assets.ts && node --import tsx build_offline.ts",
+    "prebuild": "npm run data:validate",
     "build": "tsc && npm run build:web",
     "start": "node dist/web_app.js",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "test": "npm run build:web && node --import tsx --test test_*.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.worker.json",
+    "test": "npm run build:web && tsx --tsconfig tsconfig.web.json --test test_*.ts",
     "highlight": "node --import tsx map_cli.ts",
     "map:index": "node --import tsx map_cli.ts --index",
     "map:rebuild": "node --import tsx build_n_map.ts",
     "map:preview": "node --import tsx schedule_preview.ts",
-    "map:validate": "node --import tsx n_floor_validation.ts"
+    "map:validate": "node --import tsx n_floor_validation.ts",
+    "data:validate": "node --import tsx validate_map_data.ts"
   },
   "dependencies": {
     "@awesome.me/webawesome": "^3.14.0",
@@ -29,10 +31,12 @@
     "sharp": "^0.35.4"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "jsdom": "^26.1.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vite": "^8.3.1"

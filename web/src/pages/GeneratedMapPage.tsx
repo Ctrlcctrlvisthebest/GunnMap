@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { GENERATED_MAP_SESSION_KEY } from "../features/schedule/schedule-storage.js";
 import { usePanzoom } from "../features/maps/usePanzoom.js";
+import { removeOfflineMap, savedOfflineMap, saveMapOffline } from "../features/offline/offline-client.js";
 
 const imagePattern = /^\/output\/period_map_[0-9a-f]{32}\.png$/i;
 
@@ -18,22 +19,47 @@ export function GeneratedMapPage() {
   const [searchParams] = useSearchParams();
   const queryImage = searchParams.get("image") ?? "";
   const [failed, setFailed] = useState(false);
+  const [offlinePath, setOfflinePath] = useState("");
+  const [offlineMessage, setOfflineMessage] = useState("");
+  const [saving, setSaving] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
   const art = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const validQueryImage = imagePattern.test(queryImage);
   const imagePath = savedImagePath();
-  const source = validQueryImage ? queryImage : imagePath;
+  const source = validQueryImage ? queryImage : imagePath || offlinePath;
+
+  useEffect(() => {
+    let current = true;
+    void savedOfflineMap().then(path => {if (current) setOfflinePath(path);}).catch(() => {});
+    return () => {current = false;};
+  }, []);
 
   useEffect(() => {
     setFailed(false);
   }, [source]);
 
-  usePanzoom(stage, art, image, {
+  const controls = usePanzoom(stage, art, image, {
     active: Boolean(source) && !failed,
     fit: true,
     sourceKey: source,
   });
+
+  async function changeOfflineCopy() {
+    setSaving(true);
+    setOfflineMessage("");
+    try {
+      if (source === offlinePath) {
+        await removeOfflineMap(); setOfflinePath("");
+        setOfflineMessage("Offline copy removed from this browser.");
+      } else {
+        await saveMapOffline(source); setOfflinePath(source);
+        setOfflineMessage("Saved on this device for offline viewing. This replaces any earlier offline map.");
+      }
+    } catch (error) {
+      setOfflineMessage(error instanceof Error ? error.message : "Offline saving failed. Try downloading the PNG.");
+    } finally {setSaving(false);}
+  }
 
   return (
     <main id="main-content" className="generated-map-layout" tabIndex={-1}>
@@ -55,17 +81,27 @@ export function GeneratedMapPage() {
               <Link className="download-link" to="/">
                 Edit schedule
               </Link>
+              <button type="button" className="download-link" disabled={saving} onClick={() => void changeOfflineCopy()}>
+                {saving ? "Saving…" : source === offlinePath ? "Remove offline copy" : "Save offline"}
+              </button>
             </div>
           )}
         </div>
+        <p className="offline-map-message" role="status">{offlineMessage || (source && source === offlinePath ? "This map is saved offline on this device." : "")}</p>
         {source && !failed ? <>
-          <p className="map-help">Drag to move · Scroll or pinch to zoom</p>
+          <div className="map-controls" role="group" aria-label="Map zoom">
+            <button type="button" className="download-link" onClick={controls.zoomOut} aria-label="Zoom out">−</button>
+            <button type="button" className="download-link" onClick={controls.zoomIn} aria-label="Zoom in">+</button>
+            <button type="button" className="download-link" onClick={controls.reset}>Fit map</button>
+          </div>
+          <p id="generated-map-help" className="map-help">Drag to move · Scroll or pinch to zoom · Focus the map to use +/−, arrow keys or Home.</p>
           <div className="generated-map-content">
             <div
               ref={stage}
               className="generated-map-stage"
               role="region"
               aria-label="Zoomable schedule map"
+              aria-describedby="generated-map-help"
               tabIndex={0}
             >
               <div ref={art} className="generated-map-art">
@@ -80,7 +116,8 @@ export function GeneratedMapPage() {
           </div>
         </> : (
           <div className="generated-map-empty">
-            <p>Generate a map from your schedule to view it here.</p>
+            <p>{failed ? "This image is unavailable or has expired. Generate a new map from your schedule." : "Generate a map from your schedule to view it here."}</p>
+            {failed && offlinePath && offlinePath !== source && <Link className="download-link" to={`/generate-map?image=${encodeURIComponent(offlinePath)}`}>View previously saved offline map</Link>}
             <Link className="primary-button" to="/">
               Go to Schedule Map
             </Link>

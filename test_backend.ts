@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -15,7 +15,8 @@ const periods = (building: string, room: string, color = '#0284c7') => [
 ];
 
 test('N214 variants retain identity and football-field destination', () => {
- for (const value of ['N214', 'n214', 'n-214', ' N214 ']) {
+ assert.equal(resolveRoom(' Ｎ ', 'Ｒ １４８').building, 'N');
+ for (const value of ['N214', 'n214', 'n-214', ' N214 ', 'Ｎ－２１４', 'n—214', 'Ｒ １４８', 'N214 （R 148）']) {
   const room = resolveRoom('N', value);
   assert.equal(room.id, 'R148');
   assert.equal(
@@ -121,14 +122,17 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
  try {
   const inventory = await (await fetch(`${base}/api/rooms`)).json();
   assert.equal(inventory.rooms.length, rooms.length);
-  const response = await post({ periods: periods('n', 'n214') });
+  const response = await post({ periods: periods('ｎ', 'n214') });
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
   const first = await response.json();
   assert.equal(first.selected[0].evacuation.group, 'black');
+  assert.equal(first.selected[0].building, 'N');
   assert.deepEqual(first.selected[0].marker, [1663.5, 574.5]);
-  const bytes = Buffer.from(
-   await (await fetch(base + first.image_url)).arrayBuffer(),
-  );
+  const imageResponse = await fetch(base + first.image_url);
+  assert.equal(imageResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(imageResponse.headers.get('etag'), null);
+  const bytes = Buffer.from(await imageResponse.arrayBuffer());
   const metadata = await sharp(bytes).metadata();
   assert.deepEqual([metadata.width, metadata.height], roomData.image_size);
   const before = await sharp(join(ROOT, roomData.base_image))
@@ -141,7 +145,9 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   const second = await renderPeriods(periods('M', 'M3'), dir);
   assert.notEqual(first.image_url, second.image_url);
   assert.deepEqual(Buffer.from(await (await fetch(base+first.image_url)).arrayBuffer()),bytes);
-  assert.deepEqual(await readFile(join(dir,'period_map.png')),await readFile(join(dir,second.image_url.split('/').pop()!)));
+  await assert.rejects(readFile(join(dir, 'period_map.png')), { code: 'ENOENT' });
+  assert.deepEqual((await readdir(dir)).sort(), [first.image_url.split('/').pop(), second.image_url.split('/').pop()].sort());
+  assert.equal((await fetch(base + '/output/period_map.png')).status, 404);
   const duplicatePeriods = periods('N', 'N214', '#0000ff');
   duplicatePeriods[1] = { building: 'N', room: 'N214', color: '#ff0000' };
   const result = await renderPeriods(duplicatePeriods, dir);
@@ -163,8 +169,8 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   for (const body of invalidBodies) {
    assert.equal((await post(body)).status, 400);
   }
-  assert.equal((await fetch(base+'/api/render',{method:'POST',body:'{'})).status,400);
-  assert.equal((await fetch(base+'/api/render',{method:'POST',body:'x'.repeat(16001)})).status,400);
+  assert.equal((await fetch(base+'/api/render',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'})).status,400);
+  assert.equal((await fetch(base+'/api/render',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(16001)})).status,400);
   const staticPaths = [
    '/',
    '/main.js',

@@ -9,6 +9,7 @@ import type {
 } from "../features/evacuation/types.js";
 import type { CSSVariables } from "../shared/css-types.js";
 import { useToast } from "../shared/toast.js";
+import "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
 
 type EntryWithMarker = ScheduleEvacuationEntry & {
   marker: [number, number];
@@ -49,14 +50,12 @@ function markerRoute(entry: ScheduleEvacuationEntry) {
 }
 
 function sourceProvenance(overview: EvacuationOverview) {
-  const sourceName = overview.provenance.sourceFile.split("/").pop()
-    ?? "source image";
-  const version = overview.provenance.sourceImageSha256.slice(0, 8);
+  const sourceName = overview.provenance.originalFilename;
   const revision = overview.provenance.sourceRevisionDate
     ?? "not shown on the supplied image";
   const verified = overview.provenance.verifiedOn ?? "not recorded";
 
-  return `Source: ${sourceName} · image version ${version} · revision date ${revision} · checked ${verified}.`;
+  return `User-supplied reference: ${sourceName}. Reference revision date: ${revision}. Verification date: ${verified}.`;
 }
 
 function ScheduleMarkers({
@@ -130,7 +129,7 @@ export function EvacuationPage() {
     (entry): entry is EntryWithMarker => entry.marker !== null,
   );
 
-  usePanzoom(viewerStage, viewerArt, viewerImage, {
+  const mapControls = usePanzoom(viewerStage, viewerArt, viewerImage, {
     active: viewerOpen,
     fit: true,
   });
@@ -138,7 +137,7 @@ export function EvacuationPage() {
   useEffect(() => {
     let current = true;
 
-    void fetch("/api/evacuation-data")
+    void fetch("/api/evacuation-data", { credentials: "omit" })
       .then(async response => {
         if (!response.ok) throw new Error("Evacuation data is unavailable.");
         return await response.json() as EvacuationOverview;
@@ -167,7 +166,7 @@ export function EvacuationPage() {
     void Promise.all(selected.map(async period => {
       try {
         const query = encodeURIComponent(period.room);
-        const response = await fetch(`/api/room-lookup?q=${query}`);
+        const response = await fetch(`/api/room-lookup?q=${query}`, { credentials: "omit" });
         if (!response.ok) throw new Error("Room lookup failed");
 
         const result = await response.json() as ScheduleLookupResponse;
@@ -254,7 +253,7 @@ export function EvacuationPage() {
   const validationMessage = overview
     ? overview.validationIssues.length
       ? `Data check needs review: ${overview.validationIssues.join(" ")}`
-      : "Data check passed: source image, room inventory, group labels, and reference coordinates match."
+      : "Reference data is internally consistent. This does not confirm current school instructions."
     : "Evacuation data could not be checked.";
   const validationClassName = overview?.validationIssues.length
     ? "is-error"
@@ -284,6 +283,13 @@ export function EvacuationPage() {
                 className="download-link"
                 href="/evacuation-map.png"
                 download="gunn-evacuation-map.png"
+                onClick={event => {
+                  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  void import("../features/maps/download-public-map.js")
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/evacuation-map.webp", "gunn-evacuation-map.png"))
+                    .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
+                }}
               >
                 Download PNG
               </a>
@@ -299,7 +305,7 @@ export function EvacuationPage() {
             >
               <span className="evacuation-map-art">
                 <img
-                  src="/evacuation-map.png"
+                src="/evacuation-map.webp"
                   alt="Gunn campus evacuation reference map. Open the map to zoom and pan."
                 />
               </span>
@@ -446,18 +452,26 @@ export function EvacuationPage() {
             ×
           </button>
         </div>
-        <p className="map-viewer-help">Drag to move; scroll or pinch to zoom.</p>
+        <div className="map-controls" role="group" aria-label="Evacuation map controls">
+          <button className="download-link" type="button" onClick={mapControls.zoomIn} aria-label="Zoom in on evacuation map">Zoom in</button>
+          <button className="download-link" type="button" onClick={mapControls.zoomOut} aria-label="Zoom out on evacuation map">Zoom out</button>
+          <button className="download-link" type="button" onClick={mapControls.reset}>Reset map</button>
+        </div>
+        <p className="map-viewer-help" id="evacuation-map-help">
+          Drag to move; scroll or pinch to zoom. With the map focused, use +/− to zoom, arrow keys to move, and Home or 0 to reset.
+        </p>
         <div
           ref={viewerStage}
           className="evacuation-map-stage"
           role="region"
           aria-label="Interactive evacuation map"
+          aria-describedby="evacuation-map-help"
           tabIndex={0}
         >
           <div ref={viewerArt} className="evacuation-map-art">
             <img
               ref={viewerImage}
-              src="/evacuation-map.png"
+              src="/evacuation-map.webp"
               alt="Gunn campus evacuation reference map with room group labels and marked routes."
             />
             {markerEntries.length > 0 && (

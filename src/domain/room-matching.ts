@@ -5,7 +5,16 @@ export interface RoomMatchOption {
 }
 
 export function normalizeRoomInput(value: string) {
-  return value.replace(/[\s-]+/g, "").toLowerCase();
+  return value.normalize("NFKC").replace(/[\s\-‐‑‒–—−]+/g, "").toLowerCase();
+}
+
+/** Keep all matches: duplicate labels such as K6 need an explicit location. */
+export function findRoomMatches<T extends RoomMatchOption & { building: string }>(
+  rooms: readonly T[], value: string, building = "",
+): T[] {
+  const buildingKey = normalizeRoomInput(building);
+  return rooms.filter(room => (!buildingKey || normalizeRoomInput(room.building) === buildingKey)
+    && roomMatchesInput(room, value));
 }
 
 export function roomMatchesInput(room: RoomMatchOption, value: string) {

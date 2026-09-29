@@ -11,6 +11,8 @@ export interface EvacuationGroupInfo {
 
 export interface EvacuationOverview {
   provenance: {
+    sourceKind: "supplied_reference";
+    originalFilename: string;
     sourceFile: string;
     sourceImageSha256: string;
     sourceRevisionDate: string | null;

@@ -9,7 +9,7 @@ declare module "@tarekraafat/autocomplete.js" {
       keys?: string[];
       cache?: boolean;
     };
-    searchEngine?: string;
+    searchEngine?: string | ((query: string, record: string) => string | undefined);
     resultsList?: {
       id?: string;
       class?: string;

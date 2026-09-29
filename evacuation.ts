@@ -1,8 +1,5 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { normalizeRoomInput } from './src/domain/room-matching.js';
-import { readJson, ROOT, rooms } from './project.js';
+import { readJson, ROOT } from './project.js';
+import { validateMapFiles } from './validate_map_data.js';
 type Group = 'red' | 'blue' | 'green' | 'black';
 type Pixels = [number, number, number, number];
 type Assignment = [Group, string, Pixels];
@@ -15,14 +12,17 @@ interface GroupInfo {
   appendReferenceLabel?: boolean;
   description?: string;
 }
-interface EvacuationData {
-  provenance: {
-    sourceFile: string;
-    sourceImageSha256: string;
-    sourceRevisionDate: string | null;
-    verifiedOn: string | null;
-    imageSize: [number, number];
-  };
+export interface EvacuationProvenance {
+  sourceKind: 'supplied_reference';
+  originalFilename: string;
+  sourceFile: string;
+  sourceImageSha256: string;
+  sourceRevisionDate: string | null;
+  verifiedOn: string | null;
+  imageSize: [number, number];
+}
+export interface EvacuationData {
+  provenance: EvacuationProvenance;
   groups: Record<Group, GroupInfo>;
   inventoryExceptions: Record<string, string>;
   ranges: [string, number, number, Group, string, Pixels][];
@@ -49,86 +49,12 @@ export function evacuationOverview() {
 }
 
 export function evacuationDataIssues() {
-  const issues: string[] = [];
-  const [imageWidth, imageHeight] = data.provenance.imageSize;
-  let actualHash = '';
   try {
-    const imagePath = resolve(ROOT, data.provenance.sourceFile);
-    const sourceImage = readFileSync(imagePath);
-    actualHash = createHash('sha256').update(sourceImage).digest('hex');
-    const isPng = sourceImage.length >= 24 &&
-      sourceImage.readUInt32BE(0) === 0x89504e47 &&
-      sourceImage.readUInt32BE(4) === 0x0d0a1a0a;
-    if (!isPng) {
-      issues.push(`Source image is not a readable PNG: ${data.provenance.sourceFile}`);
-    } else if (
-      sourceImage.readUInt32BE(16) !== imageWidth ||
-      sourceImage.readUInt32BE(20) !== imageHeight
-    ) {
-      issues.push('Evacuation reference dimensions do not match the source image.');
-    }
-  } catch {
-    issues.push(`Source image is missing: ${data.provenance.sourceFile}`);
+    const {errors, warnings} = validateMapFiles(ROOT);
+    return [...errors, ...warnings];
+  } catch (error) {
+    return [`Evacuation data could not be validated: ${(error as Error).message}`];
   }
-  if (actualHash && actualHash !== data.provenance.sourceImageSha256) {
-    issues.push('Source image changed; review evacuation assignments and reference coordinates.');
-  }
-
-  const assignments: Assignment[] = [
-    ...data.ranges.map((range): Assignment => [range[3], range[4], range[5]]),
-    ...Object.values(data.exact),
-    ...Object.values(data.whole),
-  ];
-  for (const [group, label, [left, top, right, bottom]] of assignments) {
-    if (!data.groups[group]?.labels.includes(label)) {
-      issues.push(`The ${group} assignment “${label}” is missing from the map legend.`);
-    }
-    if (
-      left < 0 || top < 0 || right <= left || bottom <= top ||
-      right > imageWidth || bottom > imageHeight
-    ) {
-      issues.push(`The reference coordinates for “${label}” fall outside the source image.`);
-    }
-  }
-
-  for (const [index, [prefix, start, end, , referenceLabel]] of data.ranges.entries()) {
-    if (!/^[A-Z]+$/.test(prefix) || !Number.isInteger(start) || start < 1 ||
-        !Number.isInteger(end) || end < start) {
-      issues.push(`Evacuation range “${referenceLabel}” has invalid room-number boundaries.`);
-    }
-    const matchingRooms = rooms.filter((room) => {
-      const match = room.label.toUpperCase().match(/^([A-Z]+)([1-9][0-9]*)$/);
-      return room.building === prefix && match?.[1] === prefix &&
-        Number(match[2]) >= start && Number(match[2]) <= end;
-    });
-    if (!matchingRooms.length && !data.inventoryExceptions[referenceLabel]) {
-      issues.push(`Evacuation range ${prefix}${start}–${end} has no matching room in the inventory.`);
-    }
-
-    for (const [otherPrefix, otherStart, otherEnd, otherGroup, otherLabel] of data.ranges.slice(index + 1)) {
-      const overlaps = prefix === otherPrefix && start <= otherEnd && otherStart <= end;
-      const sameAssignment = data.ranges[index][3] === otherGroup && referenceLabel === otherLabel;
-      if (overlaps && !sameAssignment) {
-        issues.push(`Evacuation ranges “${referenceLabel}” and “${otherLabel}” overlap.`);
-      }
-    }
-  }
-
-  for (const label of Object.keys(data.exact)) {
-    const matches = rooms.filter((room) =>
-      normalizeRoomInput(room.label) === normalizeRoomInput(label));
-    if (!matches.length && !data.inventoryExceptions[label]) {
-      issues.push(`Evacuation assignment “${label}” is missing from the room inventory.`);
-    } else if (matches.length > 1) {
-      issues.push(`Evacuation assignment “${label}” matches multiple rooms in the inventory.`);
-    }
-  }
-  for (const building of Object.keys(data.whole)) {
-    if (!rooms.some((room) => room.building === building) && !data.inventoryExceptions[building]) {
-      issues.push(`Evacuation building “${building}” is missing from the room inventory.`);
-    }
-  }
-  return issues;
 }
 
 function mapped([group,reference_label,[left,top,right,bottom]]: Assignment): Evacuation {

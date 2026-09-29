@@ -28,6 +28,21 @@ button:disabled { cursor: default; opacity: .45; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, .evacuation-viewport:focus-visible, .map-frame:focus-visible { outline: 2px solid #ffb3a3; outline-offset: 3px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 #main-content:focus { outline: none; }
+.offline-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 12px clamp(16px, 3.2vw, 64px) 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.offline-status.is-offline { color: #f2c2a7; }
+.offline-map-message:not(:empty) { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.map-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.map-controls button { min-width: 44px; min-height: 44px; }
+.period-room-feedback, .period-room-choices { grid-column: 2 / -1; font-size: 11px; line-height: 1.6; }
+.period-room-feedback { color: var(--muted); }
+.period-card[data-room-state="missing"], .period-card[data-room-state="ambiguous"] { border-color: #dc957d; }
+.period-card[data-room-state="missing"] .period-room-feedback, .period-card[data-room-state="ambiguous"] .period-room-feedback, .schedule-validation-message { color: #ffc1aa; }
+.period-room-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.period-room-choices button { min-height: 36px; border: 1px solid var(--border); border-radius: 4px; padding: 6px 9px; color: #fff; background: var(--field); font-size: 11px; }
+.schedule-validation-message { margin-top: 12px; font-size: 12px; line-height: 1.7; }
+.shared-preview-banner { margin: 14px 0; padding: 14px; border: 1px solid #ac7866; border-radius: 6px; background: #3b302e; font-size: 13px; line-height: 1.7; }
+.shared-preview-banner p { margin-bottom: 10px; }
+.shared-preview-banner button { margin: 4px 8px 4px 0; }
 
 /* The brand scrolls with the page; only the page links remain pinned on phones. */
 .site-sidebar {
@@ -542,3 +557,24 @@ dialog.evacuation-map-dialog:not([open]) { display: none; }
   }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+
+/* Lightweight controls keep the complete editor out of the initial DOM. */
+.period-color-trigger, .color-editor-swatch {
+  width: 40px; height: 40px; padding: 5px; border: 1px solid #77737b;
+  border-radius: 6px; background: var(--swatch-color); background-clip: content-box;
+  cursor: pointer;
+}
+.period-color-trigger:focus-visible, .color-editor-swatch:focus-visible { outline: 2px solid #f6c0b3; outline-offset: 3px; }
+.period-color-trigger:disabled { cursor: wait; opacity: .55; }
+.manual-building-toggle { justify-self: start; min-height: 36px; text-align: left; }
+.color-editor { width: min(420px, calc(100vw - 32px)); }
+.color-editor form { display: grid; gap: 16px; }
+.color-editor .room-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.color-editor-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.color-editor-swatch[aria-pressed="true"] { outline: 2px solid #f6c0b3; outline-offset: 2px; }
+.color-editor-custom, .color-editor-hex { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 14px; }
+.color-editor-custom input { width: 64px; height: 44px; padding: 3px; border: 1px solid #77737b; border-radius: 4px; background: #29292d; }
+.color-editor-hex input { width: 110px; padding: 8px; border: 1px solid #77737b; border-radius: 4px; background: #29292d; color: #fff; }
+@media (max-width: 430px) {
+  .period-card .field-building.is-manual { display: grid; grid-area: auto; grid-column: 2 / -1; }
+}
