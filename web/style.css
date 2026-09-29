@@ -557,3 +557,24 @@ dialog.evacuation-map-dialog:not([open]) { display: none; }
   }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+
+/* Lightweight controls keep the complete editor out of the initial DOM. */
+.period-color-trigger, .color-editor-swatch {
+  width: 40px; height: 40px; padding: 5px; border: 1px solid #77737b;
+  border-radius: 6px; background: var(--swatch-color); background-clip: content-box;
+  cursor: pointer;
+}
+.period-color-trigger:focus-visible, .color-editor-swatch:focus-visible { outline: 2px solid #f6c0b3; outline-offset: 3px; }
+.period-color-trigger:disabled { cursor: wait; opacity: .55; }
+.manual-building-toggle { justify-self: start; min-height: 36px; text-align: left; }
+.color-editor { width: min(420px, calc(100vw - 32px)); }
+.color-editor form { display: grid; gap: 16px; }
+.color-editor .room-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.color-editor-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.color-editor-swatch[aria-pressed="true"] { outline: 2px solid #f6c0b3; outline-offset: 2px; }
+.color-editor-custom, .color-editor-hex { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 14px; }
+.color-editor-custom input { width: 64px; height: 44px; padding: 3px; border: 1px solid #77737b; border-radius: 4px; background: #29292d; }
+.color-editor-hex input { width: 110px; padding: 8px; border: 1px solid #77737b; border-radius: 4px; background: #29292d; color: #fff; }
+@media (max-width: 430px) {
+  .period-card .field-building.is-manual { display: grid; grid-area: auto; grid-column: 2 / -1; }
+}
