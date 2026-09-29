@@ -8,7 +8,7 @@ import { ROOT } from '../project.js';
 test('lossless display maps preserve every source pixel and map coordinate', async () => {
   for (const [source, display] of [
     ['gunn_site_map.png', 'map.webp'],
-    ['gunn_evacuation_map.png', 'evacuation-map.webp'],
+    ['gunn_site_map.png', 'evacuation-map.webp'],
   ]) {
     const original = await readFile(resolve(ROOT, 'src/map', source));
     const derivative = await readFile(resolve(ROOT, 'dist/web', display));
