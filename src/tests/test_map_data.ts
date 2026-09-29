@@ -57,6 +57,7 @@ test('current site map provenance is exact and evacuation routes remain unavaila
   const {provenance, routesAvailable, groups, validationIssues} = evacuationOverview();
   assert.equal(provenance.sourceKind, 'official_site_map');
   assert.equal(provenance.originalFilename, 'UpdatedGunncampusMap9-3-26.pdf');
+  assert.equal(provenance.sourceFile, 'src/map/gunn_site_map.png');
   assert.deepEqual(provenance.imageSize, [2448, 1584]);
   assert.equal(provenance.sourceRevisionDate, '2026-09-03');
   assert.equal(provenance.verifiedOn, null);
