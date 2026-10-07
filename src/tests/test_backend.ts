@@ -168,7 +168,8 @@ test('HTTP rendering, pixels, isolated images, validation and static routes',asy
   assert.notEqual(first.image_url, second.image_url);
   assert.deepEqual(Buffer.from(await (await fetch(base+first.image_url)).arrayBuffer()),bytes);
   await assert.rejects(readFile(join(dir, 'period_map.png')), { code: 'ENOENT' });
-  assert.deepEqual((await readdir(dir)).sort(), [first.image_url.split('/').pop(), second.image_url.split('/').pop()].sort());
+  const images = [first.image_url.split('/').pop()!, second.image_url.split('/').pop()!];
+  assert.deepEqual((await readdir(dir)).sort(), images.flatMap(name => [name, name + '.json']).sort());
   assert.equal((await fetch(base + '/output/period_map.png')).status, 404);
   const duplicatePeriods = periods('N', 'N214', '#0000ff');
   duplicatePeriods[1] = { building: 'N', room: 'N214', color: '#ff0000' };
