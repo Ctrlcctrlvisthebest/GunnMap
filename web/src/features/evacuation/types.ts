@@ -1,4 +1,5 @@
 import type { EvacuationInfo } from "../rooms/types.js";
+import type { EvacuationReview } from "../../../../src/domain/evacuation-review.js";
 
 export interface EvacuationGroupInfo {
   title: string;
@@ -11,7 +12,7 @@ export interface EvacuationGroupInfo {
 
 export interface EvacuationOverview {
   provenance: {
-    sourceKind: "supplied_reference" | "official_site_map";
+    sourceKind: "supplied_reference" | "official_site_map" | "official_evacuation_plan";
     originalFilename: string;
     sourceFile: string;
     sourceImageSha256: string;
@@ -19,6 +20,7 @@ export interface EvacuationOverview {
     verifiedOn: string | null;
     imageSize: [number, number];
   };
+  review: EvacuationReview;
   routesAvailable: boolean;
   groups: Record<string, EvacuationGroupInfo>;
   inventoryExceptions: Record<string, string>;
@@ -30,12 +32,15 @@ export interface ScheduleEvacuationEntry {
   id: string;
   room: string;
   building: string;
+  floor: number | null;
+  reviewRequired: boolean;
   color: string;
   marker: [number, number] | null;
   evacuation: EvacuationInfo | null;
 }
 
 export interface ScheduleLookupResponse {
+  map_revision: string;
   rooms: Array<{
     id: string;
     label: string;
