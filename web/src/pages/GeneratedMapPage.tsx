@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { GENERATED_MAP_SESSION_KEY } from "../features/schedule/schedule-storage.js";
 import { usePanzoom } from "../features/maps/usePanzoom.js";
-import { removeOfflineMap, savedOfflineMap, saveMapOffline } from "../features/offline/offline-client.js";
+import { generatedMapMetadata, removeOfflineMap, savedOfflineMapInfo, saveMapOffline, type GeneratedMapMetadata, type SavedOfflineMap } from "../features/offline/offline-client.js";
 
 const imagePattern = /^\/output\/period_map_[0-9a-f]{32}\.png$/i;
 
@@ -20,6 +20,9 @@ export function GeneratedMapPage() {
   const queryImage = searchParams.get("image") ?? "";
   const [failed, setFailed] = useState(false);
   const [offlinePath, setOfflinePath] = useState("");
+  const [offlineInfo, setOfflineInfo] = useState<SavedOfflineMap | null>(null);
+  const [metadata, setMetadata] = useState<GeneratedMapMetadata | null>(null);
+  const [currentRevision, setCurrentRevision] = useState("");
   const [offlineMessage, setOfflineMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
@@ -31,13 +34,30 @@ export function GeneratedMapPage() {
 
   useEffect(() => {
     let current = true;
-    void savedOfflineMap().then(path => {if (current) setOfflinePath(path);}).catch(() => {});
-    return () => {current = false;};
+    void savedOfflineMapInfo().then(info => {if (current) {setOfflineInfo(info); setOfflinePath(info?.path ?? "");}}).catch(() => {});
+    const controller = new AbortController();
+    void fetch('/api/rooms', { credentials: 'omit', signal: controller.signal }).then(async response => {
+      if (!response.ok) return;
+      const data = await response.json() as { map_revision?: unknown };
+      if (current && typeof data.map_revision === 'string' && /^[a-f0-9]{64}$/.test(data.map_revision)) setCurrentRevision(data.map_revision);
+    }).catch(() => {});
+    return () => {current = false; controller.abort();};
   }, []);
 
   useEffect(() => {
     setFailed(false);
   }, [source]);
+
+  useEffect(() => {
+    setMetadata(null);
+    if (!source) return;
+    if (offlineInfo?.path === source) {setMetadata(offlineInfo); return;}
+    const controller = new AbortController();
+    void fetch(source, { method: 'HEAD', credentials: 'omit', signal: controller.signal }).then(response => {
+      if (response.ok && !controller.signal.aborted) setMetadata(generatedMapMetadata(response.headers));
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [source, offlineInfo]);
 
   const controls = usePanzoom(stage, art, image, {
     active: Boolean(source) && !failed,
@@ -50,11 +70,15 @@ export function GeneratedMapPage() {
     setOfflineMessage("");
     try {
       if (source === offlinePath) {
-        await removeOfflineMap(); setOfflinePath("");
+        await removeOfflineMap(); setOfflinePath(""); setOfflineInfo(null);
         setOfflineMessage("Offline copy removed from this browser.");
       } else {
-        await saveMapOffline(source); setOfflinePath(source);
-        setOfflineMessage("Saved on this device for offline viewing. This replaces any earlier offline map.");
+        await saveMapOffline(source);
+        const saved = await savedOfflineMapInfo();
+        setOfflineInfo(saved); setOfflinePath(saved?.path ?? "");
+        setOfflineMessage(saved?.path === source
+          ? "Saved on this device for offline viewing. This replaces any earlier offline map."
+          : "Another tab changed the saved offline map. The saved copy shown here has been refreshed.");
       }
     } catch (error) {
       setOfflineMessage(error instanceof Error ? error.message : "Offline saving failed. Try downloading the PNG.");
@@ -88,6 +112,14 @@ export function GeneratedMapPage() {
           )}
         </div>
         <p className="offline-map-message" role="status">{offlineMessage || (source && source === offlinePath ? "This map is saved offline on this device." : "")}</p>
+        {source && !failed && <div className="map-version-status" role="status">
+          <p>{metadata?.mapRevision && currentRevision
+            ? metadata.mapRevision === currentRevision ? "This map uses the current campus map and room directory." : "This map uses an older campus map or room directory. Review your rooms before using it."
+            : "This map's version could not be confirmed. Review your rooms and regenerate to use the current campus map."}</p>
+          {metadata?.generatedAt && <p>Generated <time dateTime={metadata.generatedAt}>{new Date(metadata.generatedAt).toLocaleString()}</time></p>}
+          {offlineInfo?.path === source && offlineInfo.savedAt && <p>Saved offline <time dateTime={offlineInfo.savedAt}>{new Date(offlineInfo.savedAt).toLocaleString()}</time></p>}
+          {(!metadata?.mapRevision || !currentRevision || metadata.mapRevision !== currentRevision) && <Link className="download-link" to="/">Review schedule and regenerate</Link>}
+        </div>}
         {source && !failed ? <>
           <div className="map-controls" role="group" aria-label="Map zoom">
             <button type="button" className="download-link" onClick={controls.zoomOut} aria-label="Zoom out">−</button>

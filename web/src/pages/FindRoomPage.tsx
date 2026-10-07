@@ -15,6 +15,7 @@ export function FindRoomPage() {
   const showToast = useToast();
   const [input, setInput] = useState("");
   const [rooms, setRooms] = useState<RoomData["rooms"]>([]);
+  const [mapRevision, setMapRevision] = useState("");
   const [selectedRoom, setSelectedRoom] = useState<LocatedRoom | null>(null);
   const [choices, setChoices] = useState<LocatedRoom[]>([]);
   const [message, setMessage] = useState("");
@@ -41,7 +42,7 @@ export function FindRoomPage() {
         return await response.json() as RoomData;
       })
       .then(data => {
-        if (current) setRooms(data.rooms);
+        if (current) { setRooms(data.rooms); setMapRevision(data.map_revision); }
       })
       .catch(() => {
         if (current) {
@@ -78,6 +79,11 @@ export function FindRoomPage() {
       showToast("Enter a room number or alias to search.");
       return;
     }
+    if (!mapRevision) {
+      setSearching(false);
+      showToast("The current room directory is not ready. Reload the page and try again.");
+      return;
+    }
     setSearching(true);
     setMessage("Searching…");
     try {
@@ -85,6 +91,7 @@ export function FindRoomPage() {
       const result = await response.json() as RoomLookupResponse;
       if (currentRevision !== requestRevision.current) return;
       if (!response.ok) throw new Error(result.error ?? "Room search failed.");
+      if (result.map_revision !== mapRevision) throw new Error("The campus map has changed. Reload and accept the available update before searching again.");
       setMapSize(result.map_size);
       if (!result.rooms.length) {
         setMessage("");

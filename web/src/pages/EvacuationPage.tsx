@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { readCurrentSchedule } from "../features/schedule/schedule-storage.js";
+import { scheduleReview } from "../features/schedule/schedule-review.js";
+import type { RoomData } from "../features/rooms/types.js";
+import { assemblySummary, EvacuationPeriodPicker, EvacuationRoomDetails } from "../features/evacuation/room-details.js";
 import { usePanzoom } from "../features/maps/usePanzoom.js";
 import { buildingName } from "../features/rooms/room-display.js";
 import type {
@@ -16,6 +20,7 @@ type EntryWithMarker = ScheduleEvacuationEntry & {
 };
 
 function entryRoute(entry: ScheduleEvacuationEntry) {
+  if (entry.reviewRequired) return `${entry.room} → Review this room on the current map`;
   if (!entry.evacuation || entry.evacuation.status !== "mapped") {
     return `${entry.room} → Assembly area not confirmed`;
   }
@@ -34,21 +39,6 @@ function markerGroupKey(entry: EntryWithMarker) {
   return entry.id || `${entry.marker[0]}:${entry.marker[1]}`;
 }
 
-function markerRoute(entry: ScheduleEvacuationEntry) {
-  if (entry.evacuation?.status !== "mapped") {
-    return "Assembly area not confirmed";
-  }
-
-  const reference = entry.evacuation.reference_label
-    && !/^[A-Z]$/i.test(entry.evacuation.reference_label)
-    ? `${entry.evacuation.reference_label} · `
-    : "";
-  const destination = entry.evacuation.short_destination
-    ?? entry.evacuation.destination;
-
-  return `${entry.evacuation.group} group · ${reference}${destination}`;
-}
-
 function sourceProvenance(overview: EvacuationOverview) {
   const sourceName = overview.provenance.originalFilename;
   const revision = overview.provenance.sourceRevisionDate
@@ -58,6 +48,9 @@ function sourceProvenance(overview: EvacuationOverview) {
   if (overview.provenance.sourceKind === "official_site_map") {
     return `School site map: ${sourceName}. Map revision date: ${revision}. Evacuation routes and assembly points have not been verified.`;
   }
+  if (overview.provenance.sourceKind === "official_evacuation_plan") {
+    return `School evacuation plan: ${sourceName}. Plan revision date: ${revision}. Verified on: ${verified}. Confirmed by: ${overview.review.verifiedBy ?? "not recorded"}.`;
+  }
   return `User-supplied reference: ${sourceName}. Reference revision date: ${revision}. Verification date: ${verified}.`;
 }
 
@@ -66,11 +59,13 @@ function ScheduleMarkers({
   mapSize,
   prefix,
   onSelect,
+  selectedPeriod,
 }: {
   entries: EntryWithMarker[];
   mapSize: [number, number];
   prefix: string;
   onSelect: (period: number) => void;
+  selectedPeriod?: number | null;
 }) {
   return entries.map(entry => {
     const tooltipId = `${prefix}-period-tooltip-${entry.period}`;
@@ -84,7 +79,7 @@ function ScheduleMarkers({
     const offset = (siblingIndex - (siblings.length - 1) / 2) * 22;
     const markerId = `${prefix}-period-marker-${entry.period}`;
     const building = entry.building ? `\n${buildingName(entry.building)}` : "";
-    const tooltipText = `P${entry.period} · ${entry.room}${building}\n${markerRoute(entry)}`;
+    const tooltipText = `P${entry.period} · ${entry.room}${building}\n${assemblySummary(entry)}`;
     const style = {
       "--period-color": entry.color,
       left: `calc(${entry.marker[0] / mapSize[0] * 100}% + ${offset}px)`,
@@ -98,9 +93,12 @@ function ScheduleMarkers({
           type="button"
           aria-label={`Period ${entry.period}, room ${entry.room}`}
           aria-describedby={tooltipId}
+          aria-pressed={selectedPeriod === undefined ? undefined : selectedPeriod === entry.period}
+          aria-controls={selectedPeriod === undefined ? undefined : "evacuation-selected-room"}
           id={markerId}
           style={style}
           onClick={() => onSelect(entry.period)}
+          onPointerDown={event => event.stopPropagation()}
         >
           P{entry.period}
         </button>
@@ -123,11 +121,14 @@ export function EvacuationPage() {
   const [entries, setEntries] = useState<ScheduleEvacuationEntry[]>([]);
   const [mapSize, setMapSize] = useState<[number, number]>([2448, 1584]);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
   const infoDialog = useRef<HTMLDialogElement>(null);
   const mapDialog = useRef<HTMLDialogElement>(null);
   const viewerStage = useRef<HTMLDivElement>(null);
   const viewerArt = useRef<HTMLDivElement>(null);
   const viewerImage = useRef<HTMLImageElement>(null);
+  const selectedDetails = useRef<HTMLElement>(null);
+  const selectedEntry = entries.find(entry => entry.period === selectedPeriod);
   const markerEntries = entries.filter(
     (entry): entry is EntryWithMarker => entry.marker !== null,
   );
@@ -138,9 +139,15 @@ export function EvacuationPage() {
   });
 
   useEffect(() => {
-    let current = true;
+    if (viewerOpen && selectedPeriod !== null) selectedDetails.current?.focus({ preventScroll: true });
+  }, [selectedPeriod, viewerOpen]);
 
-    void fetch("/api/evacuation-data", { credentials: "omit" })
+  useEffect(() => {
+    let current = true;
+    const controller = new AbortController();
+    const request = { credentials: "omit", signal: controller.signal } as const;
+
+    void fetch("/api/evacuation-data", request)
       .then(async response => {
         if (!response.ok) throw new Error("Evacuation data is unavailable.");
         return await response.json() as EvacuationOverview;
@@ -152,87 +159,73 @@ export function EvacuationPage() {
         if (current) showToast("Evacuation data could not be loaded.");
       });
 
-    const selected = readCurrentSchedule()
-      .map((period, index) => ({
-        ...period,
-        period: index + 1,
-        room: period.room.trim(),
-      }))
+    const periods = readCurrentSchedule();
+    const selected = periods
+      .map((period, index) => ({ ...period, period: index + 1, room: period.room.trim() }))
       .filter(period => period.room);
 
-    if (!selected.length) {
-      return () => {
-        current = false;
-      };
-    }
-
-    void Promise.all(selected.map(async period => {
-      try {
-        const query = encodeURIComponent(period.room);
-        const response = await fetch(`/api/room-lookup?q=${query}`, { credentials: "omit" });
-        if (!response.ok) throw new Error("Room lookup failed");
-
-        const result = await response.json() as ScheduleLookupResponse;
-        const matches = period.building
-          ? result.rooms.filter(room => room.building === period.building)
-          : result.rooms;
-
-        if (matches.length !== 1) {
-          return {
+    if (selected.length) {
+      void (async () => {
+        const inventoryResponse = await fetch("/api/rooms", request);
+        if (!inventoryResponse.ok) throw new Error("Room inventory is unavailable.");
+        const inventory = await inventoryResponse.json() as RoomData;
+        const needsReview = new Set(scheduleReview(periods, inventory.rooms, inventory.map_revision)
+          .map(item => item.index + 1));
+        // Repeated periods share one lookup, while each keeps its own marker.
+        const lookups = new Map<string, Promise<ScheduleLookupResponse>>();
+        const results = await Promise.all(selected.map(async period => {
+          const unresolved = (reviewRequired: boolean) => ({
             entry: {
-              period: period.period,
-              id: "",
-              room: period.room,
-              building: period.building,
-              color: period.color,
-              marker: null,
-              evacuation: null,
+              period: period.period, id: "", room: period.room, building: period.building,
+              color: period.color, floor: null, reviewRequired, marker: null, evacuation: null,
             } satisfies ScheduleEvacuationEntry,
             mapSize: null,
-          };
-        }
-
-        const room = matches[0];
-        return {
-          entry: {
-            period: period.period,
-            id: room.id,
-            room: room.label,
-            building: room.building,
-            color: period.color,
-            marker: room.marker,
-            evacuation: room.evacuation,
-          } satisfies ScheduleEvacuationEntry,
-          mapSize: result.map_size,
-        };
-      } catch {
-        return {
-          entry: {
-            period: period.period,
-            id: "",
-            room: period.room,
-            building: period.building,
-            color: period.color,
-            marker: null,
-            evacuation: null,
-          } satisfies ScheduleEvacuationEntry,
-          mapSize: null,
-        };
-      }
-    })).then(results => {
-      if (!current) return;
-      setEntries(results.map(result => result.entry));
-
-      const dimensions = results.find(result => result.mapSize)?.mapSize;
-      if (dimensions) setMapSize(dimensions);
-    });
-
-    return () => {
-      current = false;
-    };
+          });
+          if (needsReview.has(period.period)) return unresolved(true);
+          try {
+            const id = period.roomId!;
+            let lookup = lookups.get(id);
+            if (!lookup) {
+              lookup = fetch("/api/room-lookup?q=" + encodeURIComponent(id), request)
+                .then(async response => {
+                  if (!response.ok) throw new Error("Room lookup failed.");
+                  return await response.json() as ScheduleLookupResponse;
+                });
+              lookups.set(id, lookup);
+            }
+            const result = await lookup;
+            if (result.map_revision !== inventory.map_revision) return unresolved(true);
+            const room = result.rooms.find(candidate => candidate.id === id
+              && (!period.building || candidate.building === period.building));
+            if (!room) return unresolved(true);
+            return {
+              entry: {
+                period: period.period, id: room.id, room: room.label, building: room.building,
+                color: period.color, floor: room.floor, reviewRequired: false,
+                marker: room.marker, evacuation: room.evacuation,
+              } satisfies ScheduleEvacuationEntry,
+              mapSize: result.map_size,
+            };
+          } catch { return unresolved(false); }
+        }));
+        if (!current) return;
+        setEntries(results.map(result => result.entry));
+        const dimensions = results.find(result => result.mapSize)?.mapSize;
+        if (dimensions) setMapSize(dimensions);
+      })().catch(() => {
+        if (!current) return;
+        setEntries(selected.map(period => ({
+          period: period.period, id: "", room: period.room, building: period.building,
+          color: period.color, floor: null, reviewRequired: true, marker: null, evacuation: null,
+        })));
+        showToast("Your saved rooms could not be checked against the current map.");
+      });
+    }
+    return () => { current = false; controller.abort(); };
   }, [showToast]);
 
   const openViewer = () => {
+    setSelectedPeriod(null);
     setViewerOpen(true);
     mapDialog.current?.showModal();
   };
@@ -243,8 +236,6 @@ export function EvacuationPage() {
   };
 
   const scrollToEntry = (period: number) => {
-    if (viewerOpen) return;
-
     const item = document.getElementById(`schedule-period-${period}`);
     item?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     item?.focus({ preventScroll: true });
@@ -263,6 +254,7 @@ export function EvacuationPage() {
   const validationClassName = overview?.validationIssues.length
     ? "is-error"
     : "";
+  const reviewRequired = entries.some(entry => entry.reviewRequired);
 
   return (
     <>
@@ -292,7 +284,7 @@ export function EvacuationPage() {
                   if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   void import("../features/maps/download-public-map.js")
-                    .then(({ downloadPublicMap }) => downloadPublicMap("/evacuation-map.webp", "gunn-campus-map-2026.png"))
+                    .then(({ downloadPublicMap }) => downloadPublicMap("/map.webp", "gunn-campus-map-2026.png"))
                     .catch(error => showToast(error instanceof Error ? error.message : "The PNG could not be downloaded."));
                 }}
               >
@@ -302,9 +294,27 @@ export function EvacuationPage() {
           </div>
 
           <p className="map-help" role="status">
-            This September 3, 2026 school site map has no evacuation routes or assembly points.
-            Room assembly assignments are unconfirmed. Follow current school staff directions during an emergency.
+            {overview?.routesAvailable
+              ? "Room assembly assignments are based on the verified school evacuation plan."
+              : "This September 3, 2026 school site map has no evacuation routes or assembly points. Room assembly assignments are unconfirmed."}
+            {" "}Follow current school staff directions during an emergency.
           </p>
+          {overview && (
+            <div className="evacuation-review-summary" role="note">
+              <strong>{overview.review.status === "verified_school_plan" && overview.routesAvailable
+                ? "School evacuation plan verified"
+                : "Awaiting a current school evacuation plan"}</strong>
+              <span>Campus map: September 3, 2026 · Last evidence review: {overview.review.checkedOn}</span>
+              <span>{overview.routesAvailable ? `Plan verified: ${overview.provenance.verifiedOn}` : "Plan verification: not completed. All room assembly areas remain unconfirmed."}</span>
+              <button className="download-link" type="button" onClick={() => infoDialog.current?.showModal()}>View source and required evidence</button>
+            </div>
+          )}
+          {reviewRequired && (
+            <p className="evacuation-schedule-review" role="status">
+              Some saved rooms need confirmation on the current campus map. Their markers are hidden until reviewed.
+              {" "}<Link to="/">Review saved rooms</Link>
+            </p>
+          )}
 
           <div className="evacuation-map-frame">
             <button
@@ -315,7 +325,7 @@ export function EvacuationPage() {
             >
               <span className="evacuation-map-art">
                 <img
-                src="/evacuation-map.webp"
+                src="/map.webp"
                   alt="Gunn school site map dated September 3, 2026, without evacuation routes. Open the map to zoom and pan."
                 />
               </span>
@@ -372,7 +382,11 @@ export function EvacuationPage() {
                         {entry.building
                           ? buildingName(entry.building)
                           : "Choose a building to confirm this room"}
+                        {entry.floor !== null && ` · Floor ${entry.floor}`}
                       </small>
+                      <p className="schedule-evacuation-note">{entry.reviewRequired
+                        ? "Confirm this room in Schedule Map before using its current location."
+                        : entry.evacuation?.note ?? "This room could not be located. Check its name and try again."}</p>
                     </article>
                   );
                 })}
@@ -428,6 +442,20 @@ export function EvacuationPage() {
             Reference only. Follow current school staff directions during an emergency.
           </p>
           <p>{provenance}</p>
+          {overview && (
+            <section className="evacuation-review-details" aria-labelledby="evacuation-review-title">
+              <h3 id="evacuation-review-title">School plan review</h3>
+              <p>{overview.review.note}</p>
+              <p>Last evidence review: {overview.review.checkedOn} · {overview.review.checkedBy}</p>
+              <p>Plan verification: {overview.provenance.verifiedOn ?? "not completed"}</p>
+              {overview.review.missingEvidence.length > 0 && (
+                <>
+                  <p>Evidence still required:</p>
+                  <ul>{overview.review.missingEvidence.map(item => <li key={item}>{item}</li>)}</ul>
+                </>
+              )}
+            </section>
+          )}
           <p
             className={validationClassName}
             role="status"
@@ -482,7 +510,7 @@ export function EvacuationPage() {
           <div ref={viewerArt} className="evacuation-map-art">
             <img
               ref={viewerImage}
-              src="/evacuation-map.webp"
+              src="/map.webp"
               alt="Gunn school site map dated September 3, 2026, without evacuation routes."
             />
             {markerEntries.length > 0 && (
@@ -495,12 +523,15 @@ export function EvacuationPage() {
                   entries={markerEntries}
                   mapSize={mapSize}
                   prefix="viewer"
-                  onSelect={scrollToEntry}
+                  onSelect={setSelectedPeriod}
+                  selectedPeriod={selectedPeriod}
                 />
               </span>
             )}
           </div>
         </div>
+        <EvacuationPeriodPicker entries={markerEntries} selectedPeriod={selectedPeriod} onSelect={setSelectedPeriod} />
+        <EvacuationRoomDetails entry={selectedEntry} hasMarkers={markerEntries.length > 0} detailsRef={selectedDetails} />
       </dialog>
     </>
   );
