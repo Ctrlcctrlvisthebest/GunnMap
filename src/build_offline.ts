@@ -10,7 +10,6 @@ const resources: Record<string, string[]> = {
   '/ui.css': ['dist/web/ui.css'],
   '/style.css': ['web/style.css'],
   '/map.webp': ['dist/web/map.webp'],
-  '/evacuation-map.webp': ['dist/web/evacuation-map.webp'],
   '/manifest.webmanifest': ['web/manifest.webmanifest'],
   '/icon.svg': ['web/icon.svg'],
   '/apple-touch-icon.png': ['web/apple-touch-icon.png'],
@@ -20,7 +19,7 @@ const resources: Record<string, string[]> = {
 // API revisions include generation/serialization code as well as data. A data-only
 // hash would incorrectly retain old payloads after the API response format changes.
 const apiInputs = ['src/web_app.ts', 'src/project.ts', 'src/data/room_regions.json', 'src/data/evacuation_data.json',
-  'src/evacuation.ts', 'src/domain/room-matching.ts'];
+  'src/evacuation.ts', 'src/validate_map_data.ts', 'src/domain/room-matching.ts', 'src/map_revision.ts', 'src/map/gunn_site_map.png'];
 for (const path of ['/api/rooms', '/api/offline-rooms', '/api/evacuation-data']) resources[path] = apiInputs;
 for (const name of (await readdir(resolve(root, 'dist/web/assets'))).sort()) {
   if (/\.(?:js|css|woff2?|svg|png|webp)$/.test(name)) resources[`/assets/${name}`] = [`dist/web/assets/${name}`];
