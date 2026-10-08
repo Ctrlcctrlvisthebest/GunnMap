@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { generatedImagePath, isValidPng, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER } from '../../web/offline/policy.js';
-import { removeOfflineMap, savedOfflineMap, saveMapOffline } from '../../web/src/features/offline/offline-client.js';
+import { generatedImagePath, isValidPng, PERSONAL_IMAGE_KEY, PERSONAL_SOURCE_HEADER, MAP_REVISION_HEADER, GENERATED_AT_HEADER } from '../../web/offline/policy.js';
+import { generatedMapMetadata, removeOfflineMap, savedOfflineMap, savedOfflineMapInfo, saveMapOffline } from '../../web/src/features/offline/offline-client.js';
 
 const origin = 'https://gunnmap.test';
 const first = `/output/period_map_${'a'.repeat(32)}.png`;
@@ -53,6 +53,8 @@ test('explicit offline saving atomically replaces one copy and preserves it afte
     await assert.rejects(saveMapOffline(second), /complete PNG/);
     assert.equal(await savedOfflineMap(), first);
     response = image();
+    response.headers.set(MAP_REVISION_HEADER, 'c'.repeat(64));
+    response.headers.set(GENERATED_AT_HEADER, '2026-10-03T12:34:56.000Z');
     failDecode = true;
     await assert.rejects(saveMapOffline(second), /damaged/);
     assert.equal(await savedOfflineMap(), first);
@@ -66,6 +68,10 @@ test('explicit offline saving atomically replaces one copy and preserves it afte
     assert.ok([first, second].includes(await savedOfflineMap()));
     const final = entries.get(PERSONAL_IMAGE_KEY)!;
     assert.equal(await isValidPng(final), true);
+    const info = await savedOfflineMapInfo();
+    assert.equal(info?.mapRevision, 'c'.repeat(64));
+    assert.equal(info?.generatedAt, '2026-10-03T12:34:56.000Z');
+    assert.ok(info?.savedAt && Number.isFinite(Date.parse(info.savedAt)));
     await removeOfflineMap();
     assert.equal(await savedOfflineMap(), '');
     await assert.rejects(saveMapOffline('/output/period_map.png'), /cannot be saved/);
@@ -75,4 +81,10 @@ test('explicit offline saving atomically replaces one copy and preserves it afte
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test('missing or invalid image provenance remains unknown instead of adopting the current version', () => {
+  assert.deepEqual(generatedMapMetadata(new Headers()), {mapRevision: null, generatedAt: null});
+  assert.deepEqual(generatedMapMetadata(new Headers({[MAP_REVISION_HEADER]: 'not-a-revision', [GENERATED_AT_HEADER]: 'yesterday'})),
+    {mapRevision: null, generatedAt: null});
 });

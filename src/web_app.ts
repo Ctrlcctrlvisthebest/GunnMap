@@ -2,12 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { pipeline } from 'node:stream/promises';
 import sharp from 'sharp';
 import { ROOT, rooms, buildings, roomData, resolveRoom } from './project.js';
 import { findRoomMatches } from './domain/room-matching.js';
 import { evacuationDataIssues, evacuationForRoom, evacuationOverview } from './evacuation.js';
 import { renderRooms, xml } from './map_highlighter.js';
-import { cleanupGeneratedMaps, configuredRetentionMs, DEFAULT_CLEANUP_INTERVAL_MS, removeExpiredMap, validateRetentionMs } from './output_retention.js';
+import { configuredRetentionMs, DEFAULT_CLEANUP_INTERVAL_MS, validateRetentionMs } from './output_retention.js';
+import { MAP_REVISION, MAP_REVISION_DATE } from './map_revision.js';
 import { PublicResponseCache } from './http_cache.js';
 import { GeneratedMapStore, DEFAULT_MAP_STORAGE_BYTES, DEFAULT_MAP_MAX_BYTES } from './generated_map_store.js';
 import { assertRenderRequest, configuredInteger, HttpError, normalizePublicOrigin, RenderQueue, RenderRateLimiter, setSecurityHeaders } from './server_policy.js';
@@ -53,7 +55,7 @@ async function addScheduleLegend(image: Buffer, selected: LegendItem[]): Promise
     .toBuffer();
 }
 
-export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'output'), options: { store?: GeneratedMapStore; signal?: AbortSignal } = {}) {
+export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'output'), options: { store?: GeneratedMapStore; signal?: AbortSignal; requireIdentity?: boolean } = {}) {
   if (!Array.isArray(periods) || periods.length !== 7) throw new InputError('Please submit all seven period slots');
   const colors: Record<string, string[]> = {};
   const selected = [];
@@ -70,6 +72,13 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
     const roomName = String(period.room ?? '').trim();
     const color = String(period.color ?? '').trim();
     if (!roomName) continue;
+    const identityError = () => new HttpError(409, `Period ${index}: The campus map or room identity changed. Reload the page and review your classroom choices before generating a map.`);
+    // A cached older browser shell can POST to a newer server. Validate its
+    // revision before resolving labels so same-name rooms cannot silently move.
+    if ((period.mapRevision !== undefined && period.mapRevision !== MAP_REVISION)
+      || (options.requireIdentity && (period.mapRevision !== MAP_REVISION || typeof period.roomId !== 'string' || !period.roomId))) {
+      throw identityError();
+    }
     if (!building) throw new InputError(`Period ${index}: choose a building for ${roomName}`);
     if (!/^#[0-9a-f]{6}$/i.test(color)) throw new InputError(`Period ${index}: invalid color`);
 
@@ -79,6 +88,7 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
     } catch (error) {
       throw new InputError(`Period ${index}: ${(error as Error).message}`);
     }
+    if (period.roomId !== undefined && period.roomId !== room.id) throw identityError();
 
     (colors[room.id] ??= []).push(color);
     selected.push({
@@ -105,16 +115,21 @@ export async function renderPeriods(periods: unknown, outputDir = resolve(ROOT,'
   }
 
   const store = options.store ?? new GeneratedMapStore(outputDir, DEFAULT_MAP_STORAGE_BYTES, DEFAULT_MAP_MAX_BYTES, configuredRetentionMs());
-  const reservation = await store.reserve();
+  let reservation: Awaited<ReturnType<GeneratedMapStore['reserve']>> | undefined;
   let filename: string;
+  let generatedAt: string;
   try {
+    reservation = await store.reserve();
     if (options.signal?.aborted) throw new HttpError(503, 'Map request was cancelled');
     const highlighted = await renderRooms(colors, { opacity: 0.55 });
+    if (options.signal?.aborted) throw new HttpError(503, 'Map request was cancelled');
     const bytes = await addScheduleLegend(highlighted, selected);
-    filename = await reservation.write(bytes, options.signal);
-  } finally { reservation.release(); }
+    if (options.signal?.aborted) throw new HttpError(503, 'Map request was cancelled');
+    generatedAt = new Date().toISOString();
+    filename = await reservation.write(bytes, options.signal, { map_revision: MAP_REVISION, generated_at: generatedAt });
+  } finally { reservation?.release(); if (!options.store) store.close(); }
 
-  return { image_url: `/output/${filename}`, selected, warnings, map_size: roomData.image_size };
+  return { image_url: `/output/${filename}`, selected, warnings, map_size: roomData.image_size, map_revision: MAP_REVISION, map_revision_date: MAP_REVISION_DATE, generated_at: generatedAt };
 }
 
 function send(
@@ -193,7 +208,8 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
   const roomList = rooms.map(({ id, label, building, floor, aliases }) => ({
     id, label, building, floor: floor ?? 1, aliases: aliases ?? [],
   }));
-  const roomDirectory = Buffer.from(JSON.stringify({ buildings, rooms: roomList }));
+  const mapVersion = { map_revision: MAP_REVISION, map_revision_date: MAP_REVISION_DATE };
+  const roomDirectory = Buffer.from(JSON.stringify({ buildings, rooms: roomList, ...mapVersion }));
   const locatedRooms = rooms.map(room => ({
     id: room.id,
     label: room.label,
@@ -207,7 +223,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
     ],
     evacuation: evacuationForRoom(room),
   }));
-  const offlineRoomDirectory = Buffer.from(JSON.stringify({ rooms: locatedRooms, map_size: roomData.image_size }));
+  const offlineRoomDirectory = Buffer.from(JSON.stringify({ rooms: locatedRooms, map_size: roomData.image_size, ...mapVersion }));
   // Inventory and assignments are loaded once at startup. Avoid repeating the
   // synchronous image provenance check on every public API request.
   const evacuationDirectory = Buffer.from(JSON.stringify(evacuationOverview()));
@@ -216,6 +232,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
     try {
       const requestUrl = new URL(req.url ?? '/', 'http://localhost');
       const pathname = requestUrl.pathname;
+      const generatedMap = pathname.match(/^\/output\/(period_map_[0-9a-f]{32}\.png)$/);
 
       if (req.method === 'POST' && pathname === '/api/render') {
         assertRenderRequest(req, publicOrigin);
@@ -229,13 +246,16 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         res.on('close', abort);
         try {
           const result = await renderQueue.run(() => renderPeriods(
-            (body as { periods?: unknown }).periods, outputDir, { store: mapStore, signal: controller.signal },
+            (body as { periods?: unknown }).periods, outputDir, {
+              store: mapStore, signal: controller.signal,
+              requireIdentity: req.headers.origin !== undefined || req.headers['sec-fetch-site'] !== undefined,
+            },
           ), controller.signal);
           if (!res.destroyed) return send(res, 200, JSON.stringify(result));
           return;
         } finally { res.off('close', abort); }
       }
-      if (req.method !== 'GET') {
+      if (req.method !== 'GET' && !(req.method === 'HEAD' && generatedMap)) {
         const status = req.method === 'POST' ? 404 : 405;
         return send(res, status, JSON.stringify({ error: 'Not found' }));
       }
@@ -249,7 +269,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         const query = requestUrl.searchParams.get('q')?.trim() ?? '';
         if (!query) throw new InputError('Enter a room number or room alias.');
         const matches = findRoomMatches(locatedRooms, query);
-        return send(res, 200, JSON.stringify({ rooms: matches, map_size: roomData.image_size }));
+        return send(res, 200, JSON.stringify({ rooms: matches, map_size: roomData.image_size, ...mapVersion }));
       }
       if (pathname === '/api/evacuation-data') {
         return await publicCache.send(req, res, publicCache.buffer('evacuation-data', evacuationDirectory), 'application/json; charset=utf-8');
@@ -278,16 +298,14 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
         '/pwa-icon-192.png': ['web/pwa-icon-192.png', 'image/png'],
         '/pwa-icon-512.png': ['web/pwa-icon-512.png', 'image/png'],
         '/map.webp': ['dist/web/map.webp', 'image/webp'],
-        '/evacuation-map.webp': ['dist/web/evacuation-map.webp', 'image/webp'],
+        '/evacuation-map.webp': ['dist/web/map.webp', 'image/webp'],
         '/map.png': ['src/map/gunn_site_map.png', 'image/png'],
         '/evacuation-map.png': ['src/map/gunn_site_map.png', 'image/png'],
       };
 
       let file = files[pathname];
       let cacheControl = REVALIDATE_STATIC;
-      const generatedMap = pathname.match(/^\/output\/(period_map_[0-9a-f]{32}\.png)$/);
       if (generatedMap) {
-        await removeExpiredMap(outputDir, generatedMap[1], retentionMs);
         file = [resolve(outputDir, generatedMap[1]), 'image/png'];
       }
 
@@ -314,7 +332,29 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
       }
       try {
         const path = resolve(ROOT, file[0]);
-        if (generatedMap) return send(res, 200, await readFile(path), file[1]);
+        if (generatedMap) {
+          const image = await mapStore.openImage(generatedMap[1]);
+          try {
+            res.writeHead(200, {
+              'Content-Type': 'image/png',
+              'Content-Length': image.size,
+              'Cache-Control': 'no-store',
+              ...(image.metadata ? {
+                'X-GunnMap-Map-Revision': image.metadata.map_revision,
+                'X-GunnMap-Generated-At': image.metadata.generated_at,
+              } : {}),
+            });
+            if (req.method === 'HEAD') { res.end(); return; }
+            // pipeline applies response backpressure and destroys the read stream
+            // if the client disconnects; never buffer the entire personal PNG.
+            if (!image.size) { res.end(); return; }
+            await pipeline(image.handle.createReadStream({ autoClose: false, end: image.size - 1 }), res);
+            return;
+          } catch (error) {
+            if (!res.destroyed) throw error;
+            return;
+          } finally { await image.handle.close(); }
+        }
         const extraHeaders: Record<string, string> = pathname === '/sw.js' ? { 'Service-Worker-Allowed': '/' } : {};
         return await publicCache.send(req, res, await publicCache.file(path), file[1], cacheControl, extraHeaders);
       } catch (error) {
@@ -341,7 +381,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
   let cleaning: Promise<unknown> | undefined;
   const cleanup = () => {
     if (cleaning) return;
-    cleaning = cleanupGeneratedMaps(outputDir, retentionMs)
+    cleaning = mapStore.cleanup()
       .catch(error => console.error('Unable to clean up expired maps', error))
       .finally(() => { cleaning = undefined; });
   };
@@ -350,7 +390,7 @@ export function createApp(outputDir = resolve(ROOT, 'output'), options: AppOptio
     timer = setInterval(cleanup, cleanupIntervalMs);
     timer.unref();
   });
-  server.on('close', () => { if (timer) clearInterval(timer); timer = undefined; });
+  server.on('close', () => { if (timer) clearInterval(timer); timer = undefined; mapStore.close(); });
   return server;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

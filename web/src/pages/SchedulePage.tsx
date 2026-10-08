@@ -19,17 +19,24 @@ import {
   saveTemplates,
   loadSharedPreview,
   saveSharedPreview,
+  loadReviewPreview,
+  saveReviewPreview,
+  serializeSchedule,
+  templateSaveError,
 } from "../features/schedule/schedule-storage.js";
 import type { Period, ScheduleTemplate } from "../features/schedule/types.js";
 import type { RoomOption, RoomData } from "../features/rooms/types.js";
 import { buildingName } from "../features/rooms/room-display.js";
 import { findRoomMatches } from "../../../src/domain/room-matching.js";
+import { bindCurrentRooms, bindEditedRooms, scheduleReview } from "../features/schedule/schedule-review.js";
 import { periodRoomState } from "../features/schedule/room-validation.js";
+import { runRenderRequest } from "../features/schedule/render-request.js";
 import type { CSSVariables } from "../shared/css-types.js";
 import { useToast } from "../shared/toast.js";
 
 interface ActiveRender {
   revision: number;
+  controller: AbortController;
   promise: Promise<boolean>;
 }
 interface ScheduleSnapshot {
@@ -57,8 +64,9 @@ export function SchedulePage() {
   const showToast = useToast();
   const [rooms, setRooms] = useState<RoomOption[]>([]);
   const [buildings, setBuildings] = useState<string[]>([]);
+  const [mapRevision, setMapRevision] = useState("");
   const [roomsLoaded, setRoomsLoaded] = useState(false);
-  const [periods, setPeriods] = useState<Period[]>(() => loadSharedPreview() ?? loadDraft() ?? defaultPeriods());
+  const [periods, setPeriods] = useState<Period[]>(() => loadSharedPreview() ?? loadReviewPreview() ?? loadDraft() ?? defaultPeriods());
   const [sharedPreview, setSharedPreview] = useState(() => Boolean(loadSharedPreview()));
   const [validationMessage, setValidationMessage] = useState("");
   const [templates, setTemplates] = useState<ScheduleTemplate[]>(() => loadTemplates());
@@ -81,13 +89,22 @@ export function SchedulePage() {
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const sharedDialog = useRef<HTMLDialogElement>(null);
   const pendingDelete = useRef("");
+  const review = roomsLoaded ? scheduleReview(periods, rooms, mapRevision) : [];
+  const requiresReview = review.length > 0;
 
   const invalidatePreview = useCallback(() => {
     revision.current += 1;
+    const previous = activeRender.current;
+    activeRender.current = null;
+    previous?.controller.abort();
     setRendering(false);
     removeGeneratedMap();
   }, []);
-  useEffect(() => () => { revision.current += 1; }, []);
+  useEffect(() => () => {
+    revision.current += 1;
+    activeRender.current?.controller.abort();
+    activeRender.current = null;
+  }, []);
   useEffect(() => {
     const flush = () => { flushPendingDraft(); };
     const hidden = () => { if (document.visibilityState === "hidden") flush(); };
@@ -110,7 +127,7 @@ export function SchedulePage() {
       let building = period?.building && buildings.includes(period.building)
         ? period.building
         : "";
-      if (!building && period?.room) {
+      if (!building && period?.room && period.mapRevision === mapRevision) {
         const candidates = [...new Set(findRoomMatches(rooms, period.room).map(room => room.building))];
         if (candidates.length === 1) building = candidates[0];
       }
@@ -119,6 +136,7 @@ export function SchedulePage() {
         : fallbackColor;
 
       return {
+        ...period,
         building,
         room: period?.room ?? "",
         color,
@@ -127,8 +145,10 @@ export function SchedulePage() {
 
     setPeriods(normalized);
     saveCurrentSchedule(normalized);
-    const saved = !persistDraft || saveDraft(normalized);
-    if (!saved) {
+    const needsReview = scheduleReview(normalized, rooms, mapRevision).length > 0;
+    const saved = !persistDraft || (!needsReview && saveDraft(normalized));
+    saveReviewPreview(needsReview && !preview ? normalized : null);
+    if (!saved && !needsReview) {
       showToast("Draft could not be saved in this browser.");
     }
     const stayInPreview = preview || (!saved && sharedPreview);
@@ -138,7 +158,7 @@ export function SchedulePage() {
     if (clearShare) removeSharedSchedule();
     invalidatePreview();
     return saved;
-  }, [buildings, rooms, sharedPreview, invalidatePreview, showToast]);
+  }, [buildings, rooms, mapRevision, sharedPreview, invalidatePreview, showToast]);
 
   useEffect(() => {
     let current = true;
@@ -151,9 +171,10 @@ export function SchedulePage() {
         if (!current) return;
         setRooms(data.rooms);
         setBuildings(data.buildings);
+        setMapRevision(data.map_revision);
         setPeriods(existing => {
           const inferred = existing.map(period => {
-            if (period.building) return period;
+            if (period.building || period.mapRevision !== data.map_revision) return period;
             const matches = findRoomMatches(data.rooms, period.room);
             const candidates = [...new Set(matches.map(room => room.building))];
             return candidates.length === 1
@@ -161,6 +182,9 @@ export function SchedulePage() {
               : period;
           });
           saveCurrentSchedule(inferred);
+          if (scheduleReview(inferred, data.rooms, data.map_revision).length) {
+            removeGeneratedMap();
+          }
           return inferred;
         });
         setRoomsLoaded(true);
@@ -203,46 +227,53 @@ export function SchedulePage() {
     }
     lastInputUndoAt.current = now;
     setRedoHistory([]);
-    setPeriods(next);
-    saveCurrentSchedule(next);
-    if (!sharedPreview) queueDraft(next, () => showToast("Draft could not be saved in this browser."));
-    saveSharedPreview(sharedPreview ? next : null);
+    const identified = bindEditedRooms(next, previous, rooms, mapRevision);
+    const needsReview = scheduleReview(identified, rooms, mapRevision).length > 0;
+    setPeriods(identified);
+    saveCurrentSchedule(identified);
+    if (!sharedPreview && !needsReview) queueDraft(identified, () => showToast("Draft could not be saved in this browser."));
+    saveReviewPreview(needsReview && !sharedPreview ? identified : null);
+    saveSharedPreview(sharedPreview ? identified : null);
     setValidationMessage("");
     invalidatePreview();
     removeSharedSchedule();
-  }, [sharedPreview, snapshot, invalidatePreview, showToast]);
+  }, [sharedPreview, snapshot, rooms, mapRevision, invalidatePreview, showToast]);
 
-  const restoreSnapshot = (entry: ScheduleSnapshot) => {
+  const restoreSnapshot = async (entry: ScheduleSnapshot) => {
     writeSchedule(entry.periods, { persistDraft: false, preview: entry.sharedPreview });
     const draftSaved = entry.draft ? saveDraft(entry.draft) : clearDraft();
-    const templatesSaved = JSON.stringify(templates) === JSON.stringify(entry.templates) || saveTemplates(entry.templates);
+    const templatesSaved = JSON.stringify(templates) === JSON.stringify(entry.templates) || await saveTemplates(entry.templates);
     setTemplates(entry.templates);
     setSelectedTemplate(entry.selectedTemplate);
     lastInputUndoAt.current = -Infinity;
     return draftSaved && templatesSaved;
   };
 
-  const undo = () => {
+  const undo = async () => {
     const previous = undoHistory.at(-1);
     if (!previous) return;
     setUndoHistory(undoHistory.slice(0, -1));
     setRedoHistory([...redoHistory, snapshot()]);
-    showToast(restoreSnapshot(previous) ? "Last change undone." : "Change undone in the editor, but browser storage could not be updated.");
+    showToast(await restoreSnapshot(previous) ? "Last change undone." : "Change undone in the editor, but browser storage could not be updated.");
   };
 
-  const redo = () => {
+  const redo = async () => {
     const next = redoHistory.at(-1);
     if (!next) return;
     setRedoHistory(redoHistory.slice(0, -1));
     setUndoHistory([...undoHistory, snapshot()]);
-    showToast(restoreSnapshot(next) ? "Change restored." : "Change restored in the editor, but browser storage could not be updated.");
+    showToast(await restoreSnapshot(next) ? "Change restored." : "Change restored in the editor, but browser storage could not be updated.");
   };
 
   const useShared = (save: boolean) => {
     if (!sharedPeriods) return;
     recordUndo(periods);
-    // Enter preview first so a failed Save and use never falls back to autosave.
-    if (save && !saveDraft(sharedPeriods)) {
+    const needsReview = scheduleReview(sharedPeriods, rooms, mapRevision).length > 0;
+    // Legacy or changed-map shares are previews until the displayed room choices are confirmed.
+    if (needsReview) {
+      writeSchedule(sharedPeriods, { persistDraft: false, preview: true });
+      showToast("Review these rooms against the current map before saving or generating.");
+    } else if (save && !saveDraft(sharedPeriods)) {
       writeSchedule(sharedPeriods, { persistDraft: false, preview: true });
       showToast("Shared schedule opened as a preview. It could not be saved on this device.");
     } else {
@@ -251,6 +282,15 @@ export function SchedulePage() {
     }
     setSharedPeriods(null);
     sharedDialog.current?.close();
+  };
+
+  const confirmRooms = () => {
+    if (review.some(item => !item.current)) return;
+    recordUndo(periods);
+    const current = bindCurrentRooms(periods, rooms, mapRevision);
+    const saved = writeSchedule(current);
+    showToast(sharedPreview ? "Room choices confirmed for this preview. Save to this device when ready."
+      : saved ? "Room choices confirmed and saved for the current map." : "Room choices confirmed, but the draft could not be saved.");
   };
 
   const savePreviewToDevice = () => {
@@ -269,7 +309,7 @@ export function SchedulePage() {
   const share = async () => {
     flushPendingDraft();
     setMoreOpen(false);
-    const encoded = encodeURIComponent(JSON.stringify(periods));
+    const encoded = encodeURIComponent(serializeSchedule(periods));
     const shareUrl = `${window.location.origin}/#schedule=${encoded}`;
     window.history.replaceState(null, "", shareUrl);
     try {
@@ -280,7 +320,7 @@ export function SchedulePage() {
     }
   };
 
-  const saveTemplate = (event: FormEvent<HTMLFormElement>) => {
+  const saveTemplate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     flushPendingDraft();
     const name = templateName.trim().slice(0, 60);
@@ -293,9 +333,11 @@ export function SchedulePage() {
       { name, periods: clonePeriods(periods) },
       ...templates.filter(item => item.name !== name),
     ].slice(0, 8);
-    if (!saveTemplates(next)) {
+    if (!await saveTemplates(next)) {
       setTemplateMessage(
-        "Template could not be saved in this browser. Browser storage may be disabled or full.",
+        templateSaveError() === "capacity"
+          ? "This save exceeds the available browser storage capacity. Your existing saved schedules are unchanged."
+          : "Could not confirm this save in your browser. Storage may be disabled or full. Your previously saved data has been retained.",
       );
       return;
     }
@@ -317,12 +359,12 @@ export function SchedulePage() {
     showToast(`${name} loaded.`);
   };
 
-  const deleteTemplate = (event: FormEvent<HTMLFormElement>) => {
+  const deleteTemplate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = pendingDelete.current;
     const next = templates.filter(item => item.name !== name);
-    if (!saveTemplates(next)) {
-      setDeleteMessage("Template could not be deleted in this browser.");
+    if (!await saveTemplates(next)) {
+      setDeleteMessage("Could not confirm this deletion in your browser. Your previously saved data has been retained.");
       return;
     }
     recordUndo(periods);
@@ -354,7 +396,7 @@ export function SchedulePage() {
       room,
       color: PERIOD_COLORS[index],
     }));
-    writeSchedule(example);
+    writeSchedule(bindCurrentRooms(example, rooms, mapRevision));
     showToast("Example loaded. Select Generate Map to preview it.");
   };
 
@@ -377,6 +419,11 @@ export function SchedulePage() {
   const generateMap = async () => {
     flushPendingDraft();
     if (!roomsLoaded) return;
+    if (requiresReview) {
+      setValidationMessage("Confirm the restored room choices against the current map before generating.");
+      document.getElementById("schedule-map-review")?.focus();
+      return false;
+    }
     if (activeRender.current?.revision === revision.current) {
       return activeRender.current.promise;
     }
@@ -392,48 +439,54 @@ export function SchedulePage() {
     setValidationMessage("");
     setRendering(true);
     const requestRevision = revision.current;
+    const controller = new AbortController();
     const request: ActiveRender = {
       revision: requestRevision,
-      promise: (async () => {
-        try {
-          const response = await fetch("/api/render", {
-            method: "POST",
-            credentials: "omit",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ periods: periods.map(period => ({
-              ...period,
-              room: period.room.trim(),
-              building: period.room.trim() ? findRoomMatches(rooms, period.room, period.building)[0].building : "",
-            })) }),
-          });
-          const result = await response.json() as {
-            image_url?: string;
-            error?: string;
-          };
-          const imageUrl = result.image_url;
-          if (requestRevision !== revision.current) return false;
-          if (!response.ok || !imageUrl) {
-            throw new Error(result.error ?? "Map generation failed.");
-          }
-          const image = new Image();
-          image.src = imageUrl;
-          await image.decode();
-          if (requestRevision !== revision.current) return false;
-          try {
-            sessionStorage.setItem(GENERATED_MAP_SESSION_KEY, imageUrl);
-          } catch {
-            // The image URL remains shareable without session storage.
-          }
-          navigate(`/generate-map?image=${encodeURIComponent(imageUrl)}`);
-          return true;
-        } catch (error) {
-          if (requestRevision === revision.current) {
-            const message = error instanceof Error ? error.message : String(error);
-            showToast(message);
-          }
-          return false;
+      controller,
+      promise: runRenderRequest(controller, async signal => {
+        const response = await fetch("/api/render", {
+          method: "POST",
+          credentials: "omit",
+          signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ periods: periods.map(period => ({
+            ...period,
+            room: period.room.trim(),
+            building: period.room.trim() ? findRoomMatches(rooms, period.room, period.building)[0].building : "",
+          })) }),
+        });
+        const result = await response.json() as {
+          image_url?: string;
+          error?: string;
+        };
+        signal.throwIfAborted();
+        const imageUrl = result.image_url;
+        if (requestRevision !== revision.current) return false;
+        if (!response.ok || !imageUrl) {
+          throw new Error(result.error ?? "Map generation failed.");
         }
-      })().finally(() => {
+        const image = new Image();
+        const cancelImage = () => { image.src = ""; };
+        signal.addEventListener("abort", cancelImage, { once: true });
+        image.src = imageUrl;
+        try { await image.decode(); }
+        finally { signal.removeEventListener("abort", cancelImage); }
+        signal.throwIfAborted();
+        if (requestRevision !== revision.current) return false;
+        try {
+          sessionStorage.setItem(GENERATED_MAP_SESSION_KEY, imageUrl);
+        } catch {
+          // The image URL remains shareable without session storage.
+        }
+        navigate(`/generate-map?image=${encodeURIComponent(imageUrl)}`);
+        return true;
+      }).catch(error => {
+        if (requestRevision === revision.current &&
+          (!controller.signal.aborted || (controller.signal.reason as Error)?.name === "TimeoutError")) {
+          showToast(error instanceof Error ? error.message : String(error));
+        }
+        return false;
+      }).finally(() => {
         if (activeRender.current === request) {
           activeRender.current = null;
           setRendering(false);
@@ -555,11 +608,26 @@ export function SchedulePage() {
               </details>
             </div>
           </div>
+          {requiresReview && (
+            <div id="schedule-map-review" className="shared-preview-banner" role="region" aria-label="Review restored rooms" tabIndex={-1}>
+              <h3>Check rooms on the current map</h3>
+              <p>This schedule was saved before room identities were recorded, or uses a different map version. Its original saved copy stays unchanged until you confirm or replace these room choices.</p>
+              <ol className="shared-schedule-preview">
+                {review.map(({ index, period, current }) => <li key={index}>
+                  <span>Period {index + 1}: {period.room} — {current
+                    ? `current match: ${current.label} · ${buildingName(current.building)} · floor ${current.floor}`
+                    : "no unique current match; edit this room first"}</span>
+                </li>)}
+              </ol>
+              <p>Compare these matches with your current school schedule. Confirming uses their locations on the current map.</p>
+              <button type="button" className="primary-button" onClick={confirmRooms} disabled={review.some(item => !item.current)}>Confirm current room choices</button>
+            </div>
+          )}
           {sharedPreview && (
             <div className="shared-preview-banner" role="region" aria-label="Shared schedule preview">
               <p>Your shared schedule is a temporary preview. Editing it keeps your device draft unchanged.</p>
               <div className="shared-schedule-actions">
-                <button type="button" className="primary-button" onClick={savePreviewToDevice} disabled={!roomsLoaded}>Save to this device</button>
+                <button type="button" className="primary-button" onClick={savePreviewToDevice} disabled={!roomsLoaded || requiresReview}>Save to this device</button>
                 <button type="button" className="download-link" onClick={returnToLocalDraft} disabled={!roomsLoaded}>Return to my draft</button>
               </div>
             </div>
@@ -584,7 +652,7 @@ export function SchedulePage() {
               <button
                 className="primary-button"
                 type="submit"
-                disabled={!roomsLoaded || rendering}
+                disabled={!roomsLoaded || rendering || requiresReview}
               >
                 {rendering ? "Generating…" : "Generate Map"}
                 <span aria-hidden="true">→</span>

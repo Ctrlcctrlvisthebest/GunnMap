@@ -154,7 +154,7 @@ async function savedImage(path: string): Promise<Response | undefined> {
 interface OfflineRoom {
   id: string; label: string; building: string; aliases?: string[];
 }
-interface OfflineDirectory { rooms: OfflineRoom[]; map_size: [number, number] }
+interface OfflineDirectory { rooms: OfflineRoom[]; map_size: [number, number]; map_revision: string; map_revision_date: string }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string';
 const nullableString = (value: unknown) => value === null || string(value);
@@ -162,7 +162,9 @@ const point = (value: unknown): value is [number, number] => Array.isArray(value
 
 /** Validate the fields used by matching, room details and map overlays. */
 function validDirectory(value: unknown): value is OfflineDirectory {
-  if (!record(value) || !point(value.map_size) || !value.map_size.every(n => Number.isInteger(n) && n > 0)
+  if (!record(value) || !string(value.map_revision) || !/^[a-f0-9]{64}$/.test(value.map_revision)
+    || !string(value.map_revision_date) || !/^\d{4}-\d{2}-\d{2}$/.test(value.map_revision_date)
+    || !point(value.map_size) || !value.map_size.every(n => Number.isInteger(n) && n > 0)
     || !Array.isArray(value.rooms) || !value.rooms.length) return false;
   const ids = new Set<string>();
   return value.rooms.every(room => {
@@ -226,7 +228,8 @@ async function offlineLookup(url: URL): Promise<Response> {
   try { data = await cachedDirectory(await caches.open(publicCache)); }
   catch { /* Missing or inaccessible storage uses the same recovery message. */ }
   if (!data) return unavailable('The offline classroom directory is unavailable. Reconnect to download it again.');
-  return Response.json({rooms: findRoomMatches(data.rooms, input), map_size: data.map_size}, {
+  return Response.json({rooms: findRoomMatches(data.rooms, input), map_size: data.map_size,
+    map_revision: data.map_revision, map_revision_date: data.map_revision_date}, {
     headers: {'Cache-Control': 'no-store', 'X-GunnMap-Offline': '1'},
   });
 }
@@ -238,6 +241,12 @@ async function handle(request: Request, event: FetchEvent): Promise<Response> {
     catch {
       return unavailable('Map generation needs a connection. You can still view maps saved offline.');
     }
+  }
+  if (request.method === 'HEAD' && GENERATED_IMAGE.test(url.pathname)) {
+    const saved = await savedImage(url.pathname);
+    if (saved) return new Response(null, {status: 200, headers: saved.headers});
+    try {return await networkFetch(request, NETWORK_GET_TIMEOUT_MS);}
+    catch {return unavailable('This map was not saved offline. Reconnect to download it.');}
   }
   if (request.method !== 'GET') return networkFetch(request);
   if (GENERATED_IMAGE.test(url.pathname)) {
@@ -261,6 +270,11 @@ async function handle(request: Request, event: FetchEvent): Promise<Response> {
     catch { return offlineLookup(url); }
   }
   const cache = await caches.open(publicCache);
+  // Retain old links without keeping a second byte-identical map in each release.
+  if (url.pathname === '/evacuation-map.webp' && !url.search) {
+    const map = await cache.match('/map.webp');
+    if (map) return map;
+  }
   if (request.mode === 'navigate' && appRoute(url.pathname)) {
     // Serve a shell and scripts from the same build until an update is activated.
     const shell = await cache.match('/');

@@ -7,6 +7,7 @@ export interface RoomOption {
 }
 
 export interface RoomData {
+  map_revision: string;
   rooms: RoomOption[];
   buildings: string[];
 }
@@ -30,5 +31,6 @@ export interface LocatedRoom extends RoomOption {
 export interface RoomLookupResponse {
   rooms: LocatedRoom[];
   map_size: [number, number];
+  map_revision: string;
   error?: string;
 }
