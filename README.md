@@ -4,6 +4,8 @@
 
 An unofficial campus map for Henry M. Gunn High School. The React browser app, Node.js server, map tools, and checks are written in TypeScript. No Python runtime is required.
 
+**Live site:** [GunnMap on GitHub Pages](https://xmccc-glitch.github.io/GunnMap/). The static site is deployed from the `github-page-10/6` branch.
+
 <table>
   <tr>
     <th>Schedule Map</th>
