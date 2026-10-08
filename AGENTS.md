@@ -67,7 +67,6 @@ GunnMap/
 - Only merge a pull request into `main` or push changes directly to `main` when that command returns exactly `Ijustneedanid` or `XmCCC-glitch`. Check again immediately before the merge or push; a Git commit author, email address, or remote URL is not proof of the authenticated account.
 - If the account cannot be verified or does not match either allowed login, do not merge or push to `main`. Explain the result to the user and leave any prepared pull request open for an authorized account to merge.
 - After creating a pull request, request a Codex review by posting a separate pull request comment containing exactly `@codex review`. Put the trigger in a comment, not at the bottom of the pull request description.
-- If Codex does not start the review, check that the repository is connected and code review is enabled in Codex settings. If the connector asks for an environment, set up a Codex cloud environment for the repository before retrying.
 
 ## Verification
 
