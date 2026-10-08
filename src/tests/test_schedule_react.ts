@@ -23,6 +23,7 @@ dom.window.HTMLDialogElement.prototype.close = function () {
 const { createRoot } = await import("react-dom/client");
 const { MemoryRouter, Routes, Route, useNavigate } = await import("react-router-dom");
 const { SchedulePage } = await import("../../web/src/pages/SchedulePage.js");
+const { RENDER_TIMEOUT_MS } = await import("../../web/src/features/schedule/render-request.js");
 const { ToastProvider } = await import("../../web/src/shared/toast.js");
 const storage = await import("../../web/src/features/schedule/schedule-storage.js");
 
@@ -65,12 +66,15 @@ async function harness(options: { draft?: Period[]; shared?: Period[]; legacy?: 
   if (options.legacyTemplates) document.cookie = `gunnmap_schedule_templates=${encodeURIComponent(JSON.stringify(options.legacyTemplates))}; path=/`;
   allowCookieWrites = !options.blocked;
   const requests: Period[][] = [];
+  const renderSignals: AbortSignal[] = [];
+  const images: { src: string }[] = [];
   const io = {
     render: async (_periods: Period[]): Promise<Response> => response({ image_url: "/output/period_map_11111111111111111111111111111111.png" }),
     decode: async () => {},
   };
   Object.defineProperty(globalThis, "Image", { configurable: true, value: class {
     src = "";
+    constructor() { images.push(this); }
     decode() { return io.decode(); }
   } });
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (url: string, init?: RequestInit) => {
@@ -78,6 +82,8 @@ async function harness(options: { draft?: Period[]; shared?: Period[]; legacy?: 
     if (url === "/api/rooms") return response({ rooms: currentRooms, buildings, map_revision: MAP_REVISION });
     assert.equal(url, "/api/render");
     const periods = (JSON.parse(String(init?.body)) as { periods: Period[] }).periods;
+    assert.ok(init?.signal);
+    renderSignals.push(init.signal);
     requests.push(periods);
     return io.render(periods);
   } });
@@ -140,7 +146,7 @@ async function harness(options: { draft?: Period[]; shared?: Period[]; legacy?: 
     await act(async () => { root.unmount(); await tick(); });
     allowCookieWrites = true;
   };
-  return { get, click, clickLabel, input, submit, route, cookie, requests, io, saveTemplate, close };
+  return { get, click, clickLabel, input, submit, route, cookie, requests, renderSignals, images, io, saveTemplate, close };
 }
 
 test("real React shared preview survives edits and route changes without replacing the device draft", async () => {
@@ -261,13 +267,16 @@ test("saving and deleting templates participate in the existing undo history", a
   } finally { await h.close(); }
 });
 
-test("editing or leaving the React schedule page discards pending render responses", async () => {
+test("editing or leaving the React schedule page aborts requests and discards pending responses", async () => {
   const h = await harness({ draft: schedule("M3") });
   try {
     const pending = deferred<Response>();
     h.io.render = () => pending.promise;
     await h.submit();
+    await h.submit();
+    assert.equal(h.requests.length, 1, "repeated submits share the active request");
     await h.input("N214");
+    assert.equal(h.renderSignals[0].aborted, true);
     await act(async () => { pending.resolve(response({ image_url: "/output/stale.png" })); await tick(); });
     assert.equal(document.querySelector("#generated-page"), null);
     assert.equal(sessionStorage.getItem(storage.GENERATED_MAP_SESSION_KEY), null);
@@ -275,6 +284,7 @@ test("editing or leaving the React schedule page discards pending render respons
     h.io.render = () => leaving.promise;
     await h.submit();
     await h.route("/other");
+    assert.equal(h.renderSignals[1].aborted, true);
     await act(async () => { leaving.resolve(response({ image_url: "/output/stale-after-leaving.png" })); await tick(); });
     assert.ok(h.get("#other-page"));
     assert.equal(sessionStorage.getItem(storage.GENERATED_MAP_SESSION_KEY), null);
@@ -289,11 +299,49 @@ test("undo while a rendered image decodes prevents stale navigation", async () =
     h.io.decode = () => decode.promise;
     await h.submit();
     await h.clickLabel("Undo");
+    assert.equal(h.renderSignals[0].aborted, true);
+    assert.equal(h.images[0].src, "", "cancel the obsolete image load as well");
     await act(async () => { decode.resolve(); await tick(); });
     assert.equal(document.querySelector("#generated-page"), null);
     assert.equal(h.get<HTMLInputElement>("#period-1-room").value, "M3");
     assert.equal(sessionStorage.getItem(storage.GENERATED_MAP_SESSION_KEY), null);
   } finally { await h.close(); }
+});
+
+test("a timed-out render unlocks retry and cannot navigate after a late response", async context => {
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    const pending = deferred<Response>();
+    h.io.render = () => pending.promise;
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    await h.submit();
+    await act(async () => { context.mock.timers.tick(RENDER_TIMEOUT_MS); await tick(); });
+    assert.equal(h.renderSignals[0].aborted, true);
+    assert.match(h.get(".toast-region").textContent!, /took too long.*try again/i);
+    assert.equal(h.get<HTMLButtonElement>('form[aria-busy] button[type="submit"]').disabled, false);
+    await act(async () => { pending.resolve(response({ image_url: "/output/stale.png" })); await tick(); });
+    assert.equal(document.querySelector("#generated-page"), null);
+    assert.equal(h.images.length, 0, "an aborted response must not start downloading an image");
+    h.io.render = async () => response({ image_url: "/output/period_map_33333333333333333333333333333333.png" });
+    await h.submit();
+    assert.ok(h.get("#generated-page"));
+  } finally { context.mock.timers.reset(); await h.close(); }
+});
+
+test("the render deadline also bounds a stuck image decode", async context => {
+  const h = await harness({ draft: schedule("M3") });
+  try {
+    const decode = deferred<void>();
+    h.io.decode = () => decode.promise;
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    await h.submit();
+    await act(async () => { context.mock.timers.tick(RENDER_TIMEOUT_MS); await tick(); });
+    assert.equal(h.images[0].src, "");
+    assert.equal(h.get<HTMLButtonElement>('form[aria-busy] button[type="submit"]').disabled, false);
+    await act(async () => { decode.resolve(); await tick(); });
+    assert.equal(document.querySelector("#generated-page"), null);
+    assert.equal(sessionStorage.getItem(storage.GENERATED_MAP_SESSION_KEY), null);
+  } finally { context.mock.timers.reset(); await h.close(); }
 });
 
 test("replacing a same-name template can be undone without changing the current schedule", async () => {

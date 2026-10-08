@@ -230,8 +230,11 @@ test('expired personal URLs return 404 and legacy latest maps are never served',
     assert.equal(personal.headers['cache-control'], 'no-store');
     assert.equal(personal.headers.etag, undefined);
     assert.equal(personal.body.toString(), 'image');
+    // GET/HEAD validate their own descriptor without acquiring the storage lock.
+    // Expired URLs are refused immediately; scheduled reconciliation deletes them.
+    for (let attempt = 0; attempt < 100 && (await readdir(dir)).includes(stale); attempt++) await delay(20);
     assert.deepEqual((await readdir(dir)).sort(), [fresh, 'period_map.png'].sort());
-  }, { retentionMs: 60_000 });
+  }, { retentionMs: 60_000, cleanupIntervalMs: 20 });
 });
 
 test('retention starts with the server and closes its timer on shutdown', async () => {
