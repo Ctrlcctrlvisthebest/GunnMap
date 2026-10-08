@@ -30,11 +30,13 @@ import { buildingName } from "../features/rooms/room-display.js";
 import { findRoomMatches } from "../../../src/domain/room-matching.js";
 import { bindCurrentRooms, bindEditedRooms, scheduleReview } from "../features/schedule/schedule-review.js";
 import { periodRoomState } from "../features/schedule/room-validation.js";
+import { runRenderRequest } from "../features/schedule/render-request.js";
 import type { CSSVariables } from "../shared/css-types.js";
 import { useToast } from "../shared/toast.js";
 
 interface ActiveRender {
   revision: number;
+  controller: AbortController;
   promise: Promise<boolean>;
 }
 interface ScheduleSnapshot {
@@ -92,10 +94,17 @@ export function SchedulePage() {
 
   const invalidatePreview = useCallback(() => {
     revision.current += 1;
+    const previous = activeRender.current;
+    activeRender.current = null;
+    previous?.controller.abort();
     setRendering(false);
     removeGeneratedMap();
   }, []);
-  useEffect(() => () => { revision.current += 1; }, []);
+  useEffect(() => () => {
+    revision.current += 1;
+    activeRender.current?.controller.abort();
+    activeRender.current = null;
+  }, []);
   useEffect(() => {
     const flush = () => { flushPendingDraft(); };
     const hidden = () => { if (document.visibilityState === "hidden") flush(); };
@@ -430,48 +439,54 @@ export function SchedulePage() {
     setValidationMessage("");
     setRendering(true);
     const requestRevision = revision.current;
+    const controller = new AbortController();
     const request: ActiveRender = {
       revision: requestRevision,
-      promise: (async () => {
-        try {
-          const response = await fetch("/api/render", {
-            method: "POST",
-            credentials: "omit",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ periods: periods.map(period => ({
-              ...period,
-              room: period.room.trim(),
-              building: period.room.trim() ? findRoomMatches(rooms, period.room, period.building)[0].building : "",
-            })) }),
-          });
-          const result = await response.json() as {
-            image_url?: string;
-            error?: string;
-          };
-          const imageUrl = result.image_url;
-          if (requestRevision !== revision.current) return false;
-          if (!response.ok || !imageUrl) {
-            throw new Error(result.error ?? "Map generation failed.");
-          }
-          const image = new Image();
-          image.src = imageUrl;
-          await image.decode();
-          if (requestRevision !== revision.current) return false;
-          try {
-            sessionStorage.setItem(GENERATED_MAP_SESSION_KEY, imageUrl);
-          } catch {
-            // The image URL remains shareable without session storage.
-          }
-          navigate(`/generate-map?image=${encodeURIComponent(imageUrl)}`);
-          return true;
-        } catch (error) {
-          if (requestRevision === revision.current) {
-            const message = error instanceof Error ? error.message : String(error);
-            showToast(message);
-          }
-          return false;
+      controller,
+      promise: runRenderRequest(controller, async signal => {
+        const response = await fetch("/api/render", {
+          method: "POST",
+          credentials: "omit",
+          signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ periods: periods.map(period => ({
+            ...period,
+            room: period.room.trim(),
+            building: period.room.trim() ? findRoomMatches(rooms, period.room, period.building)[0].building : "",
+          })) }),
+        });
+        const result = await response.json() as {
+          image_url?: string;
+          error?: string;
+        };
+        signal.throwIfAborted();
+        const imageUrl = result.image_url;
+        if (requestRevision !== revision.current) return false;
+        if (!response.ok || !imageUrl) {
+          throw new Error(result.error ?? "Map generation failed.");
         }
-      })().finally(() => {
+        const image = new Image();
+        const cancelImage = () => { image.src = ""; };
+        signal.addEventListener("abort", cancelImage, { once: true });
+        image.src = imageUrl;
+        try { await image.decode(); }
+        finally { signal.removeEventListener("abort", cancelImage); }
+        signal.throwIfAborted();
+        if (requestRevision !== revision.current) return false;
+        try {
+          sessionStorage.setItem(GENERATED_MAP_SESSION_KEY, imageUrl);
+        } catch {
+          // The image URL remains shareable without session storage.
+        }
+        navigate(`/generate-map?image=${encodeURIComponent(imageUrl)}`);
+        return true;
+      }).catch(error => {
+        if (requestRevision === revision.current &&
+          (!controller.signal.aborted || (controller.signal.reason as Error)?.name === "TimeoutError")) {
+          showToast(error instanceof Error ? error.message : String(error));
+        }
+        return false;
+      }).finally(() => {
         if (activeRender.current === request) {
           activeRender.current = null;
           setRendering(false);
