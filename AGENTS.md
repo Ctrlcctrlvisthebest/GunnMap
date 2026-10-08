@@ -61,11 +61,12 @@ GunnMap/
 - Do not infer evacuation routes or destinations from the September 2026 site map. All room assignments remain unconfirmed until a current school evacuation plan is verified.
 - Put temporary renders in `output/` or a temporary directory; commit only deliberate `demo_*.png` or `demo_*.webp` files for documentation.
 
-## GitHub account and main branch
+## GitHub account, pull requests, and main branch
 
 - For requests involving a pull request (for example, “help me create PR”), merging, or changing `main`, check the currently authenticated GitHub account with `gh api user --jq .login` before taking any action that would merge into or directly update `main`.
 - Only merge a pull request into `main` or push changes directly to `main` when that command returns exactly `Ijustneedanid` or `XmCCC-glitch`. Check again immediately before the merge or push; a Git commit author, email address, or remote URL is not proof of the authenticated account.
 - If the account cannot be verified or does not match either allowed login, do not merge or push to `main`. Explain the result to the user and leave any prepared pull request open for an authorized account to merge.
+- After creating a pull request, request a Codex review by posting a separate pull request comment containing exactly `@codex review`. Put the trigger in a comment, not at the bottom of the pull request description.
 
 ## Verification
 
