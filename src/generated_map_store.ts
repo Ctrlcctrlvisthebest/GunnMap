@@ -9,6 +9,7 @@ export const DEFAULT_MAP_STORAGE_BYTES = 512 * 1024 * 1024;
 export const DEFAULT_MAP_MAX_BYTES = 16 * 1024 * 1024;
 const STORED_FILE = /^period_map_[0-9a-f]{32}\.png(?:\.json)?$/;
 const MAX_METADATA_BYTES = 1024;
+const STAT_CONCURRENCY = 16;
 export interface GeneratedMapMetadata { map_revision: string; generated_at: string }
 
 /** Completed PNGs are immutable. Track owned writes/deletes incrementally and
@@ -76,16 +77,34 @@ export class GeneratedMapStore {
     }
   }
 
+  /** Bound filesystem work without leaving unfinished workers outside the
+   * accounting lock on failure. Process PNGs before their sidecars because image
+   * expiry can remove both; all accounting mutations remain in one transaction. */
+  private async syncFiles(names: string[], now = Date.now()): Promise<void> {
+    for (const sidecars of [false, true]) {
+      const phase = names.filter(name => name.endsWith('.json') === sidecars);
+      let next = 0;
+      const workers = Array.from({ length: Math.min(STAT_CONCURRENCY, phase.length) }, async () => {
+        while (next < phase.length) await this.syncFile(phase[next++], true, now);
+      });
+      const settled = await Promise.allSettled(workers);
+      const failure = settled.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') {
+        // A failed reconciliation may have replaced only part of the inventory.
+        // Never allow an unchanged directory stamp to certify that partial count.
+        this.rescan = true;
+        throw failure.reason;
+      }
+    }
+  }
+
   private async reconcile(): Promise<void> {
     this.rescan = false;
     this.changed.clear();
     const before = await this.stamp();
     const names = (await readdir(this.dir)).filter(name => STORED_FILE.test(name));
     this.inventory.clear(); this.used = 0;
-    // Images first: expiry also removes sidecars before they are counted.
-    names.sort((a, b) => Number(a.endsWith('.json')) - Number(b.endsWith('.json')));
-    const now = Date.now();
-    for (const filename of names) await this.syncFile(filename, true, now);
+    await this.syncFiles(names);
     this.directoryStamp = await this.stamp();
     // Do not certify a directory changed during enumeration. The next operation
     // repeats reconciliation, including changes whose watch delivery is delayed.
@@ -115,10 +134,8 @@ export class GeneratedMapStore {
       return;
     }
     const changes = [...this.changed];
-    for (const filename of changes) {
-      this.changed.delete(filename);
-      await this.syncFile(filename, true);
-    }
+    for (const filename of changes) this.changed.delete(filename);
+    await this.syncFiles(changes);
     if (changes.length) this.directoryStamp = await this.stamp();
   }
 
@@ -163,7 +180,7 @@ export class GeneratedMapStore {
         // Watch delivery can lag (notably macOS): verify known files once before
         // commit to catch immediate external in-place growth. This safety pass
         // does not enumerate the directory or recount it several times per render.
-        for (const name of [...this.inventory.keys()]) await this.syncFile(name, true);
+        await this.syncFiles([...this.inventory.keys()]);
         if (this.used + this.reserved + (metadataBytes?.length ?? 0) > this.budget) throw new HttpError(503, 'Map storage is full. Please try again later.', 60);
         const filename = `period_map_${randomUUID().replaceAll('-', '')}.png`;
         const temporary = resolve(this.dir, `.${filename}.tmp`);
@@ -197,33 +214,33 @@ export class GeneratedMapStore {
   }
 
   /** Open one regular image without following links. A file handle keeps the
-   * streamed bytes bound to the validated file, even if the pathname changes. */
+   * streamed bytes bound to the validated file, even if the pathname changes.
+   * Reads do not change storage accounting and must not wait behind a quota scan
+   * or PNG write. Expired files are refused here and removed by reconciliation. */
   async openImage(filename: string): Promise<{ handle: FileHandle; size: number; metadata?: GeneratedMapMetadata }> {
     if (!GENERATED_MAP_FILENAME.test(filename)) throw new HttpError(404, 'Not found');
-    return this.exclusive(async () => {
-      await this.refresh();
-      await this.syncFile(filename, true);
-      const handle = await openRegular(resolve(this.dir, filename));
+    if (this.closed) throw new Error('Generated map store is closed');
+    const handle = await openRegular(resolve(this.dir, filename));
+    try {
+      if (this.closed) throw new Error('Generated map store is closed');
+      const info = await handle.stat();
+      if (Date.now() - info.mtimeMs >= this.retentionMs) throw new HttpError(404, 'Not found');
+      let metadata: GeneratedMapMetadata | undefined;
+      let metadataHandle: FileHandle | undefined;
       try {
-        const info = await handle.stat();
-        if (Date.now() - info.mtimeMs >= this.retentionMs) throw new HttpError(404, 'Not found');
-        let metadata: GeneratedMapMetadata | undefined;
-        let metadataHandle: FileHandle | undefined;
-        try {
-          metadataHandle = await openRegular(resolve(this.dir, filename + '.json'));
-          if ((await metadataHandle.stat()).size <= MAX_METADATA_BYTES) {
-            // Bound the read even if an operator grows the sidecar after stat.
-            const bytes = Buffer.alloc(MAX_METADATA_BYTES + 1);
-            const { bytesRead } = await metadataHandle.read(bytes, 0, bytes.length, 0);
-            if (bytesRead <= MAX_METADATA_BYTES) metadata = validateMetadata(JSON.parse(bytes.subarray(0, bytesRead).toString('utf8')));
-          }
-        } catch (error) {
-          // Legacy PNGs or invalid/unavailable sidecars have unknown provenance.
-          if (!(error instanceof HttpError) && !(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
-        } finally { await metadataHandle?.close(); }
-        return { handle, size: info.size, metadata };
-      } catch (error) { await handle.close(); throw error; }
-    });
+        metadataHandle = await openRegular(resolve(this.dir, filename + '.json'));
+        if ((await metadataHandle.stat()).size <= MAX_METADATA_BYTES) {
+          // Bound the read even if an operator grows the sidecar after stat.
+          const bytes = Buffer.alloc(MAX_METADATA_BYTES + 1);
+          const { bytesRead } = await metadataHandle.read(bytes, 0, bytes.length, 0);
+          if (bytesRead <= MAX_METADATA_BYTES) metadata = validateMetadata(JSON.parse(bytes.subarray(0, bytesRead).toString('utf8')));
+        }
+      } catch (error) {
+        // Legacy PNGs or invalid/unavailable sidecars have unknown provenance.
+        if (!(error instanceof HttpError) && !(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ELOOP') throw error;
+      } finally { await metadataHandle?.close(); }
+      return { handle, size: info.size, metadata };
+    } catch (error) { await handle.close(); throw error; }
   }
 }
 
